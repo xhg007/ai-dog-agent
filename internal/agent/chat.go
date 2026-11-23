@@ -20,6 +20,8 @@ import (
 	"ai-dog-agent/internal/config"
 	"ai-dog-agent/internal/eventbus"
 	"ai-dog-agent/internal/llm"
+	"ai-dog-agent/internal/store"
+	"ai-dog-agent/internal/task"
 	"ai-dog-agent/internal/workspace"
 )
 
@@ -32,23 +34,25 @@ type ChatService struct {
 	bus        *eventbus.Bus
 	appr       *approval.Manager
 	backupRoot string
-	store      *sessionStore // 会话持久化（一个会话一个 JSON 文件）
+	store      *sessionStore   // 会话持久化（一个会话一个 JSON 文件）
+	tasks      *task.Manager   // 任务生命周期（M5；nil 时跳过任务记录，仅事件推送）
 
 	mu       sync.Mutex
 	sessions map[string]*chatSession
 }
 
 type chatSession struct {
-	id         string
-	agentID    string // Agent 唯一 ID，随请求体 agent_id 字段上送
-	agent      adk.Agent
-	runner     *adk.Runner
-	cancel     context.CancelFunc
-	running    bool
-	title      string    // 线程标题（取首条用户消息摘要）
-	createdAt  time.Time
-	lastActive time.Time
-	messages   []StoredMessage // 持久化消息历史
+	id             string
+	agentID        string // Agent 唯一 ID，随请求体 agent_id 字段上送
+	agent          adk.Agent
+	runner         *adk.Runner
+	cancel         context.CancelFunc
+	running        bool
+	currentTaskID  string    // 当前轮次的任务 ID（M5）
+	title          string    // 线程标题（取首条用户消息摘要）
+	createdAt      time.Time
+	lastActive     time.Time
+	messages       []StoredMessage // 持久化消息历史
 }
 
 // SessionInfo 线程列表条目（对齐 Codex 左栏 Threads）。
@@ -61,14 +65,16 @@ type SessionInfo struct {
 }
 
 // NewChatService 创建服务实例，并从 sessionDir 恢复历史会话。
+// tasks 为任务管理器（M5 FR-5.2）；传 nil 时跳过任务记录（仅事件推送）。
 func NewChatService(cfg *config.Manager, ws *workspace.Manager, bus *eventbus.Bus,
-	appr *approval.Manager, backupRoot, sessionDir string) *ChatService {
+	appr *approval.Manager, backupRoot, sessionDir string, tasks *task.Manager) *ChatService {
 	s := &ChatService{
 		cfg:        cfg,
 		ws:         ws,
 		bus:        bus,
 		appr:       appr,
 		backupRoot: backupRoot,
+		tasks:      tasks,
 		sessions:   make(map[string]*chatSession),
 	}
 	if sessionDir != "" {
@@ -178,6 +184,18 @@ func (s *ChatService) SendMessage(sessionID string, content string) error {
 	sess.running = true
 	s.persistLocked(sess)
 	s.mu.Unlock()
+
+	// 创建任务（FR-5.2）：一轮对话 = 一个任务
+	if s.tasks != nil {
+		taskID, err := s.tasks.Start(sessionID, truncateTitle(content))
+		if err != nil {
+			slog.Warn("创建任务失败（继续执行，仅缺少任务记录）", "err", err)
+		} else {
+			s.mu.Lock()
+			sess.currentTaskID = taskID
+			s.mu.Unlock()
+		}
+	}
 
 	bus := s.bus
 	bus.Emit(eventbus.Event{Type: eventbus.EvChatStarted, SessionID: sessionID,
@@ -303,10 +321,22 @@ func (s *ChatService) buildDynamicExtras() string {
 }
 
 // runTurn 执行一轮对话：回放持久化历史，消费事件流并转发到前端，同时落盘消息。
+// 任务状态机：正常结束 → completed；中断 → interrupted；其余错误 → failed（FR-5.2）。
 func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
 	bus := s.bus
 	sessionID := sess.id
+	taskID := sess.currentTaskID
 
+	finishTask := func(status, errMsg string) {
+		if s.tasks != nil && taskID != "" {
+			if err := s.tasks.Finish(sessionID, taskID, status, errMsg); err != nil {
+				slog.Warn("任务状态落库失败", "task", taskID, "err", err)
+			}
+		}
+		s.mu.Lock()
+		sess.currentTaskID = ""
+		s.mu.Unlock()
+	}
 	emitError := func(msg string) {
 		bus.Emit(eventbus.Event{Type: eventbus.EvChatError, SessionID: sessionID,
 			Data: map[string]string{"message": msg}})
@@ -328,10 +358,12 @@ func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
 		if ev.Err != nil {
 			if ctx.Err() != nil {
 				emitError("已中断")
-			} else {
-				slog.Error("Agent 执行错误", "session", sessionID, "err", ev.Err)
-				emitError(ev.Err.Error())
+				finishTask(store.StatusInterrupted, "用户中断")
+				return
 			}
+			slog.Error("Agent 执行错误", "session", sessionID, "err", ev.Err)
+			emitError(ev.Err.Error())
+			finishTask(store.StatusFailed, truncateTitle(ev.Err.Error()))
 			return
 		}
 		mo := ev.Output.MessageOutput
@@ -360,6 +392,7 @@ func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
 				if err != nil {
 					slog.Error("读取流失败", "session", sessionID, "err", err)
 					emitError(err.Error())
+					finishTask(store.StatusFailed, truncateTitle(err.Error()))
 					return
 				}
 				collectDelta(&sb, msg, &usage)
@@ -377,6 +410,13 @@ func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
 		}
 	}
 
+	// 中断可能表现为正常结束（无错误）：按 ctx 状态定终态
+	if ctx.Err() != nil {
+		emitError("已中断")
+		finishTask(store.StatusInterrupted, "用户中断")
+		return
+	}
+
 	bus.Emit(eventbus.Event{Type: eventbus.EvChatDone, SessionID: sessionID,
 		Data: eventbus.ChatDoneData{
 			Content:          string(sb),
@@ -387,6 +427,35 @@ func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
 	if len(sb) > 0 {
 		s.appendMessages(sess, StoredMessage{Role: "assistant", Content: string(sb)})
 	}
+	// Token 用量落库 + llm_usage 事件（FR-5.4；Task 3 引入 callbacks 后改为按调用粒度）
+	s.recordUsage(sessionID, taskID, &usage)
+	finishTask(store.StatusCompleted, "")
+}
+
+// recordUsage 按当前激活模型单价折算本轮成本并落库/推送（元/1M tokens）。
+func (s *ChatService) recordUsage(sessionID, taskID string, usage *schema.TokenUsage) {
+	if s.tasks == nil || usage == nil || usage.TotalTokens == 0 {
+		return
+	}
+	model := ""
+	var pIn, pOut float64
+	if mc, err := s.cfg.ActiveModel(); err == nil {
+		model, pIn, pOut = mc.Model, mc.PriceIn, mc.PriceOut
+	}
+	in, out := int64(usage.PromptTokens), int64(usage.CompletionTokens)
+	costIn := float64(in) / 1e6 * pIn
+	costOut := float64(out) / 1e6 * pOut
+	data := eventbus.LLMUsageData{
+		TaskID: taskID, Model: model,
+		InputTokens: in, OutputTokens: out,
+		CostIn: costIn, CostOut: costOut,
+	}
+	s.tasks.Emit(sessionID, taskID, eventbus.EvLLMUsage, data)
+	s.tasks.AppendTokenUsage(store.TokenUsage{
+		TaskID: taskID, Model: model,
+		InputTokens: in, OutputTokens: out,
+		CostIn: costIn, CostOut: costOut,
+	})
 }
 
 // collectDelta 累积文本内容并记录 Token 用量。

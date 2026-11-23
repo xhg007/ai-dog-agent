@@ -14,58 +14,58 @@ const (
 
 // Task 一次用户消息触发的执行轮次。
 type Task struct {
-	ID        string // UUID，由调用方生成
-	SessionID string
-	Title     string
-	Status    string // StatusRunning/StatusCompleted/StatusFailed/StatusInterrupted
-	Error     string
-	CreatedAt time.Time
+	ID        string `json:"id"`        // UUID，由调用方生成
+	SessionID string `json:"sessionId"` // 关联线程，前端跳转用
+	Title     string `json:"title"`
+	Status    string `json:"status"` // StatusRunning/StatusCompleted/StatusFailed/StatusInterrupted
+	Error     string `json:"error,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
 	// FinishedAt 终态时间（运行中为零值；扫描侧用 sql.NullTime）。
-	FinishedAt time.Time
+	FinishedAt time.Time `json:"finishedAt,omitempty"`
 }
 
 // TaskEvent 任务事件流记录（task_events 表，FR-5.1 事件落库）。
 type TaskEvent struct {
-	ID        int64
-	TaskID    string
-	Type      string // task_state/tool_call/tool_result/llm_usage/model_fallback/chat_error...
-	Payload   string // JSON 文本
-	CreatedAt time.Time
+	ID        int64     `json:"id"`
+	TaskID    string    `json:"taskId"`
+	Type      string    `json:"type"` // task_state/tool_call/tool_result/llm_usage/model_fallback/chat_error...
+	Payload   string    `json:"payload"` // JSON 文本
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 // TokenUsage 一次 LLM 调用的用量与成本（token_usage 表，FR-5.4）。
 type TokenUsage struct {
-	ID           int64
-	TaskID       string
-	Model        string
-	InputTokens  int64
-	OutputTokens int64
-	CostIn       float64 // 元
-	CostOut      float64 // 元
-	CreatedAt    time.Time
+	ID           int64     `json:"id"`
+	TaskID       string    `json:"taskId"`
+	Model        string    `json:"model"`
+	InputTokens  int64     `json:"inputTokens"`
+	OutputTokens int64     `json:"outputTokens"`
+	CostIn       float64   `json:"costIn"`  // 元
+	CostOut      float64   `json:"costOut"` // 元
+	CreatedAt    time.Time `json:"createdAt"`
 }
 
 // Checkpoint 工具级检查点（checkpoints 表，FR-5.3 断点恢复）。
 // phase=before 在工具执行前写（含 args + 消息快照）；phase=after 在执行后写（追加 result）。
 type Checkpoint struct {
-	ID         int64
-	TaskID     string
-	Seq        int64 // 任务内递增序号
-	Phase      string // "before" / "after"
-	ToolName   string
-	ToolArgs   string // JSON 文本
-	ToolResult string // JSON 文本（仅 after）
-	Messages   string // 会话消息快照 JSON（仅 before 携带，供断点重建历史）
-	CreatedAt  time.Time
+	ID         int64     `json:"id"`
+	TaskID     string    `json:"taskId"`
+	Seq        int64     `json:"seq"` // 任务内递增序号
+	Phase      string    `json:"phase"` // "before" / "after"
+	ToolName   string    `json:"toolName"`
+	ToolArgs   string    `json:"toolArgs"`   // JSON 文本
+	ToolResult string    `json:"toolResult"` // JSON 文本（仅 after）
+	Messages   string    `json:"messages"`   // 会话消息快照 JSON（仅 before 携带，供断点重建历史）
+	CreatedAt  time.Time `json:"createdAt"`
 }
 
 // DailyUsageRow 日维度用量汇总（DailyUsage 聚合结果）。
 type DailyUsageRow struct {
-	Date         string  // YYYY-MM-DD
-	Calls        int64
-	InputTokens  int64
-	OutputTokens int64
-	CostTotal    float64
+	Date         string  `json:"date"` // YYYY-MM-DD
+	Calls        int64   `json:"calls"`
+	InputTokens  int64   `json:"inputTokens"`
+	OutputTokens int64   `json:"outputTokens"`
+	CostTotal    float64 `json:"costTotal"`
 }
 
 // Store 持久层接口（DuckDB 实现；写入建议经 AsyncWriter 异步化）。

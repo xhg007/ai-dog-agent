@@ -3,9 +3,11 @@
 
 import * as ApprovalService from "./approvalservice.js";
 import * as ConfigService from "./configservice.js";
+import * as TaskService from "./taskservice.js";
 import * as WorkspaceService from "./workspaceservice.js";
 export {
     ApprovalService,
     ConfigService,
+    TaskService,
     WorkspaceService
 };

@@ -12,6 +12,7 @@ type AsyncWriter struct {
 	ops    chan func(Store) error
 	done   chan struct{}
 	wg     sync.WaitGroup
+	closeOnce sync.Once
 	closed bool
 	mu     sync.Mutex
 }
@@ -60,24 +61,26 @@ func (w *AsyncWriter) Submit(op func(Store) error) {
 	}
 }
 
-// Close 停止接收新操作，排空队列后返回（不关闭底层 Store）。
+// Close 停止接收新操作，排空队列后返回（不关闭底层 Store）。可安全重复调用。
 func (w *AsyncWriter) Close() {
-	w.mu.Lock()
-	w.closed = true
-	w.mu.Unlock()
-	close(w.done)
-	w.wg.Wait()
-	// 排空残留
-	for {
-		select {
-		case op := <-w.ops:
-			if err := op(w.store); err != nil {
-				slog.Warn("store 排空写入失败", "err", err)
+	w.closeOnce.Do(func() {
+		w.mu.Lock()
+		w.closed = true
+		w.mu.Unlock()
+		close(w.done)
+		w.wg.Wait()
+		// 排空残留
+		for {
+			select {
+			case op := <-w.ops:
+				if err := op(w.store); err != nil {
+					slog.Warn("store 排空写入失败", "err", err)
+				}
+			default:
+				return
 			}
-		default:
-			return
 		}
-	}
+	})
 }
 
 // Store 底层只读访问（查询用；写请走 Submit）。

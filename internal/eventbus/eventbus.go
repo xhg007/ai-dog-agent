@@ -18,7 +18,22 @@ const (
 
 	EvApprovalRequest = "approval_request" // 审批请求（前端弹审批卡片）
 	EvApprovalDecided = "approval_decided" // 审批已决策（前端移除卡片）
+
+	// M5 生产化事件（FR-5.1），同时落库 task_events 表
+	EvTaskState     = "task_state"     // 任务状态流转（运行/完成/失败/中断）
+	EvToolCall      = "tool_call"      // 工具调用开始（含参数摘要）
+	EvLLMUsage      = "llm_usage"      // LLM 调用用量与成本
+	EvModelFallback = "model_fallback" // 模型故障切换
 )
+
+// TaskStateData 任务状态载荷。
+type TaskStateData struct {
+	TaskID   string `json:"taskId"`
+	Status   string `json:"status"` // running/completed/failed/interrupted
+	Title    string `json:"title,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
 
 // EventName Wails 事件名。
 const EventName = "agent:event"
@@ -53,6 +68,30 @@ type ChatDoneData struct {
 	PromptTokens     int64  `json:"promptTokens"`
 	CompletionTokens int64  `json:"completionTokens"`
 	TotalTokens      int64  `json:"totalTokens"`
+}
+
+// ToolCallData 工具调用开始载荷（TaskID 关联任务；Args 为 JSON 摘要）。
+type ToolCallData struct {
+	TaskID string `json:"taskId,omitempty"`
+	Tool   string `json:"tool"`
+	Args   string `json:"args,omitempty"`
+}
+
+// LLMUsageData LLM 调用用量与成本载荷（FR-5.4）。
+type LLMUsageData struct {
+	TaskID       string  `json:"taskId,omitempty"`
+	Model        string  `json:"model"`
+	InputTokens  int64   `json:"inputTokens"`
+	OutputTokens int64   `json:"outputTokens"`
+	CostIn       float64 `json:"costIn"`  // 元
+	CostOut      float64 `json:"costOut"` // 元
+}
+
+// ModelFallbackData 模型故障切换载荷（FR-5.6）。
+type ModelFallbackData struct {
+	From   string `json:"from"`
+	To     string `json:"to"`
+	Reason string `json:"reason"`
 }
 
 // ApprovalRequestData 审批请求载荷。

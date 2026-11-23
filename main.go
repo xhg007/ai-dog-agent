@@ -13,6 +13,8 @@ import (
 	"ai-dog-agent/internal/eventbus"
 	"ai-dog-agent/internal/logging"
 	"ai-dog-agent/internal/service"
+	"ai-dog-agent/internal/store"
+	"ai-dog-agent/internal/task"
 	"ai-dog-agent/internal/workspace"
 )
 
@@ -43,11 +45,23 @@ func main() {
 	bus := eventbus.New()
 	backupRoot := filepath.Join(cfgDir, "backups")
 	sessionDir := filepath.Join(cfgDir, "sessions")
+
+	// 统计持久层（M5 FR-5.2）：DuckDB 单文件 + 异步写入器
+	statDB, err := store.Open(filepath.Join(cfgDir, "stats.duckdb"))
+	if err != nil {
+		log.Fatalf("初始化统计数据库失败: %v", err)
+	}
+	defer statDB.Close()
+	writer := store.NewAsyncWriter(statDB, 512)
+	defer writer.Close()
+
 	apprMgr := approval.New(bus)
-	chatSvc := agent.NewChatService(cfgMgr, wsMgr, bus, apprMgr, backupRoot, sessionDir)
+	taskMgr := task.New(statDB, writer, bus)
+	chatSvc := agent.NewChatService(cfgMgr, wsMgr, bus, apprMgr, backupRoot, sessionDir, taskMgr)
 	cfgSvc := service.NewConfigService(cfgMgr, wsMgr)
 	wsSvc := service.NewWorkspaceService(cfgMgr, wsMgr)
 	apprSvc := service.NewApprovalService(apprMgr, wsMgr, backupRoot)
+	taskSvc := service.NewTaskService(taskMgr)
 
 	app := application.New(application.Options{
 		Name:        "ai-dog-agent",
@@ -56,6 +70,7 @@ func main() {
 			application.NewService(cfgSvc),
 			application.NewService(wsSvc),
 			application.NewService(apprSvc),
+			application.NewService(taskSvc),
 			application.NewService(chatSvc),
 		},
 		Assets: application.AssetOptions{
