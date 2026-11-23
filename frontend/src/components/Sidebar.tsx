@@ -1,9 +1,14 @@
 import { ThreadInfo } from '../App'
+import TaskPanel from './TaskPanel'
+
+export type SideView = 'threads' | 'tasks'
 
 interface Props {
   threads: ThreadInfo[]
   activeId: string
   wsPath: string
+  sideView: SideView
+  onSideView: (v: SideView) => void
   onSelect: (id: string) => void
   onNew: () => void
   onDelete: (id: string) => void
@@ -27,7 +32,7 @@ function timeLabel(ms: number): string {
   return `${d.getMonth() + 1}/${d.getDate()}`
 }
 
-export default function Sidebar({ threads, activeId, wsPath, onSelect, onNew, onDelete, onBrowseWorkspace, onOpenSettings, configCounts }: Props) {
+export default function Sidebar({ threads, activeId, wsPath, sideView, onSideView, onSelect, onNew, onDelete, onBrowseWorkspace, onOpenSettings, configCounts }: Props) {
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -47,10 +52,22 @@ export default function Sidebar({ threads, activeId, wsPath, onSelect, onNew, on
       </div>
 
       <div className="side-section threads-section">
-        <div className="side-label">
-          线程
-          <button className="side-add" onClick={onNew} title="新建线程">＋</button>
+        <div className="side-view-tabs">
+          <button
+            className={`side-view-tab${sideView === 'threads' ? ' active' : ''}`}
+            onClick={() => onSideView('threads')}
+          >线程</button>
+          <button
+            className={`side-view-tab${sideView === 'tasks' ? ' active' : ''}`}
+            onClick={() => onSideView('tasks')}
+          >任务</button>
+          {sideView === 'threads' && (
+            <button className="side-add" onClick={onNew} title="新建线程">＋</button>
+          )}
         </div>
+
+        {sideView === 'threads' ? (
+        <>
         <div className="thread-list">
           {threads.map(t => (
             <div
@@ -76,6 +93,10 @@ export default function Sidebar({ threads, activeId, wsPath, onSelect, onNew, on
         <div className="side-placeholder" title="在设置中配置">
           Skills {configCounts.skills} · MCP {configCounts.mcp} · Agents {configCounts.agents}
         </div>
+        </>
+        ) : (
+          <TaskPanel onOpenThread={onSelect} />
+        )}
       </div>
 
       <div className="side-footer">

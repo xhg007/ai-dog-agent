@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Events } from '@wailsio/runtime'
-import Sidebar from './components/Sidebar'
+import Sidebar, { SideView } from './components/Sidebar'
 import ThreadPanel from './components/ThreadPanel'
 import ReviewPanel from './components/ReviewPanel'
 import SettingsPanel from './components/SettingsPanel'
@@ -21,6 +21,7 @@ function App() {
   const [activeId, setActiveId] = useState<string>('')
   const [wsPath, setWsPath] = useState<string>('')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [sideView, setSideView] = useState<SideView>('threads')
   const [reviewTick, setReviewTick] = useState(0)
   const [approvalsByThread, setApprovalsByThread] = useState<Record<string, PendingApproval[]>>({})
   const [configCounts, setConfigCounts] = useState({ skills: 0, mcp: 0, agents: 0 })
@@ -134,6 +135,8 @@ function App() {
         threads={threads}
         activeId={activeId}
         wsPath={wsPath}
+        sideView={sideView}
+        onSideView={setSideView}
         onSelect={setActiveId}
         onNew={newThread}
         onDelete={deleteThread}

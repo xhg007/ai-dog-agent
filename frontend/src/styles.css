@@ -638,6 +638,123 @@ body {
   color: var(--text);
 }
 
+/* ===== M5：侧栏 线程/任务 视图切换 ===== */
+.side-view-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.side-view-tab {
+  flex: 1;
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 4px 0;
+  border-radius: 6px;
+}
+.side-view-tab:hover { color: var(--text); background: var(--bg-elevated); }
+.side-view-tab.active {
+  color: var(--accent);
+  border-color: var(--border);
+  background: var(--bg-elevated);
+}
+
+/* ===== M5：任务面板 ===== */
+.task-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.task-list { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
+.task-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 11px;
+}
+.task-item:hover { border-color: var(--accent); }
+.task-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.task-badge.b-running { color: var(--accent); border-color: var(--accent); }
+.task-badge.b-done { color: var(--green); border-color: var(--green); }
+.task-badge.b-fail { color: var(--red); border-color: var(--red); }
+.task-badge.b-stop { color: var(--yellow); border-color: var(--yellow); }
+.task-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.task-time { flex-shrink: 0; color: var(--text-dim); font-size: 10px; }
+.task-recover {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--yellow);
+  color: var(--yellow);
+  cursor: pointer;
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 5px;
+}
+.task-recover:hover { background: rgba(232, 178, 58, 0.12); }
+.task-recover:disabled { opacity: 0.5; cursor: wait; }
+.task-hint {
+  margin: 0 0 6px;
+  font-size: 10px;
+  color: var(--yellow);
+  word-break: break-all;
+}
+
+/* ===== M5：用量报表 ===== */
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  margin-top: 8px;
+}
+.usage-table th, .usage-table td {
+  padding: 5px 8px;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+}
+.usage-table th:first-child, .usage-table td:first-child { text-align: left; }
+.usage-table th {
+  color: var(--text-dim);
+  font-weight: 500;
+  font-size: 10px;
+}
+.usage-table td.num { font-family: var(--font-mono); }
+.usage-table tfoot td {
+  border-top: 1px solid var(--border);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ===== M5：模型切换系统提示 ===== */
+.msg.system {
+  font-size: 11px;
+  color: var(--yellow);
+  background: rgba(232, 178, 58, 0.08);
+  border: 1px solid rgba(232, 178, 58, 0.3);
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin: 4px 0;
+}
+
 .status-badge {
   font-family: var(--font-mono);
   font-size: 10px;

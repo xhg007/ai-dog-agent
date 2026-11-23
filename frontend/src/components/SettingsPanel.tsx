@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ConfigService } from '../../bindings/ai-dog-agent/internal/service/index.js'
+import { ConfigService, TaskService } from '../../bindings/ai-dog-agent/internal/service/index.js'
 
 interface ModelConfig {
   id: string
@@ -47,7 +47,9 @@ interface AppConfig {
   shellWhitelist: string[]
 }
 
-type Tab = 'models' | 'skills' | 'mcp' | 'agents' | 'security'
+type Tab = 'models' | 'skills' | 'mcp' | 'agents' | 'security' | 'usage'
+
+interface DailyUsageRow { date: string; calls: number; inputTokens: number; outputTokens: number; costTotal: number }
 
 const emptyAppConfig: AppConfig = { models: [], activeModelId: '', skills: [], mcpServers: [], shellWhitelist: [] }
 
@@ -189,6 +191,7 @@ function SettingsPanel() {
     { id: 'mcp', label: `MCP (${cfg.mcpServers.length})` },
     { id: 'agents', label: `项目 Agent (${agents.length})` },
     { id: 'security', label: '安全' },
+    { id: 'usage', label: '用量' },
   ]
 
   return (
@@ -438,9 +441,72 @@ function SettingsPanel() {
           </>
         )}
 
+        {tab === 'usage' && (
+          <UsageTab />
+        )}
+
         {error && <p className="hint" style={{ color: 'var(--red)' }}>保存失败：{error}</p>}
       </div>
     </div>
+  )
+}
+
+// UsageTab 日维度 Token 用量与成本报表（M5 FR-5.4）。
+function UsageTab() {
+  const [rows, setRows] = useState<DailyUsageRow[]>([])
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    TaskService.GetDailyUsage(30)
+      .then((r: any) => setRows((r as DailyUsageRow[]) ?? []))
+      .catch((e: any) => setErr(typeof e === 'string' ? e : e?.message ?? String(e)))
+  }, [])
+
+  const totalCalls = rows.reduce((s, r) => s + (r.calls ?? 0), 0)
+  const totalIn = rows.reduce((s, r) => s + (r.inputTokens ?? 0), 0)
+  const totalOut = rows.reduce((s, r) => s + (r.outputTokens ?? 0), 0)
+  const totalCost = rows.reduce((s, r) => s + (r.costTotal ?? 0), 0)
+
+  return (
+    <>
+      <h3>Token 用量（近 30 天）</h3>
+      <p className="hint">
+        每次 LLM 调用的输入/输出 tokens 与成本（元/1M tokens 单价折算）按日汇总。
+        成本随模型设置中的单价实时折算，历史记录不改写。
+      </p>
+      {err && <p className="hint" style={{ color: 'var(--red)' }}>{err}</p>}
+      {rows.length === 0 ? (
+        <p className="hint">暂无用量记录</p>
+      ) : (
+        <table className="usage-table">
+          <thead>
+            <tr>
+              <th>日期</th><th>调用</th><th>输入 tok</th><th>输出 tok</th><th>成本（元）</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => (
+              <tr key={r.date}>
+                <td>{r.date}</td>
+                <td>{r.calls}</td>
+                <td>{r.inputTokens.toLocaleString()}</td>
+                <td>{r.outputTokens.toLocaleString()}</td>
+                <td className="num">{r.costTotal.toFixed(2)}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td>总计</td>
+              <td>{totalCalls}</td>
+              <td>{totalIn.toLocaleString()}</td>
+              <td>{totalOut.toLocaleString()}</td>
+              <td className="num">{totalCost.toFixed(2)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      )}
+    </>
   )
 }
 

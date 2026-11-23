@@ -6,7 +6,7 @@ import ApprovalCard, { PendingApproval } from './ApprovalCard'
 import MarkdownBody from './MarkdownBody'
 
 interface Msg {
-  role: 'user' | 'assistant' | 'error' | 'tool'
+  role: 'user' | 'assistant' | 'error' | 'tool' | 'system'
   content: string
   tool?: string
 }
@@ -136,6 +136,12 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, onThreadsCh
           setRunning(false)
           setMessages(m => [...m, { role: 'error', content: e.data?.message ?? '未知错误' }])
           onThreadsChanged()
+          break
+        case 'model_fallback':
+          setMessages(m => [...m, {
+            role: 'system',
+            content: `⚠ 主模型不可用，已切换到「${e.data?.to}」（${e.data?.reason}）`,
+          }])
           break
       }
     })
