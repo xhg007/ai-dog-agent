@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -76,6 +77,15 @@ func NewChatService(cfg *config.Manager, ws *workspace.Manager, bus *eventbus.Bu
 		backupRoot: backupRoot,
 		tasks:      tasks,
 		sessions:   make(map[string]*chatSession),
+	}
+	// 注册全局观测 handler（M5）：tasks 非 nil 时才注册，避免测试中重复注册全局 handler
+	if tasks != nil {
+		RegisterObsHandler(tasks, func() (string, float64, float64) {
+			if mc, err := cfg.ActiveModel(); err == nil {
+				return mc.Model, mc.PriceIn, mc.PriceOut
+			}
+			return "", 0, 0
+		})
 	}
 	if sessionDir != "" {
 		s.store = newSessionStore(sessionDir)
@@ -345,8 +355,13 @@ func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
 
 	s.mu.Lock()
 	input := historyMessages(sess.messages)
+	snapshot := marshalMessages(sess.messages)
 	s.mu.Unlock()
-	iter := sess.runner.Run(ctx, input)
+	// 观测上下文：会话/任务标识 + 消息快照（callbacks handler 写 checkpoint 用）
+	runCtx := withObsInfo(ctx, &obsInfo{
+		SessionID: sessionID, TaskID: taskID, Snapshot: snapshot,
+	})
+	iter := sess.runner.Run(runCtx, input)
 	var sb []byte
 	var usage schema.TokenUsage
 
@@ -427,35 +442,8 @@ func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
 	if len(sb) > 0 {
 		s.appendMessages(sess, StoredMessage{Role: "assistant", Content: string(sb)})
 	}
-	// Token 用量落库 + llm_usage 事件（FR-5.4；Task 3 引入 callbacks 后改为按调用粒度）
-	s.recordUsage(sessionID, taskID, &usage)
+	// Token 用量按调用粒度由全局 callbacks handler 记录（见 callback.go）
 	finishTask(store.StatusCompleted, "")
-}
-
-// recordUsage 按当前激活模型单价折算本轮成本并落库/推送（元/1M tokens）。
-func (s *ChatService) recordUsage(sessionID, taskID string, usage *schema.TokenUsage) {
-	if s.tasks == nil || usage == nil || usage.TotalTokens == 0 {
-		return
-	}
-	model := ""
-	var pIn, pOut float64
-	if mc, err := s.cfg.ActiveModel(); err == nil {
-		model, pIn, pOut = mc.Model, mc.PriceIn, mc.PriceOut
-	}
-	in, out := int64(usage.PromptTokens), int64(usage.CompletionTokens)
-	costIn := float64(in) / 1e6 * pIn
-	costOut := float64(out) / 1e6 * pOut
-	data := eventbus.LLMUsageData{
-		TaskID: taskID, Model: model,
-		InputTokens: in, OutputTokens: out,
-		CostIn: costIn, CostOut: costOut,
-	}
-	s.tasks.Emit(sessionID, taskID, eventbus.EvLLMUsage, data)
-	s.tasks.AppendTokenUsage(store.TokenUsage{
-		TaskID: taskID, Model: model,
-		InputTokens: in, OutputTokens: out,
-		CostIn: costIn, CostOut: costOut,
-	})
 }
 
 // collectDelta 累积文本内容并记录 Token 用量。
@@ -467,6 +455,18 @@ func collectDelta(sb *[]byte, msg *schema.Message, usage *schema.TokenUsage) {
 	if msg.ResponseMeta != nil && msg.ResponseMeta.Usage != nil {
 		*usage = *msg.ResponseMeta.Usage
 	}
+}
+
+// marshalMessages 会话消息快照 JSON（checkpoint 断点恢复用）。
+func marshalMessages(msgs []StoredMessage) string {
+	if len(msgs) == 0 {
+		return "[]"
+	}
+	b, err := json.Marshal(msgs)
+	if err != nil {
+		return "[]"
+	}
+	return string(b)
 }
 
 // truncateTitle 取首条用户消息前 30 字符作为线程标题。

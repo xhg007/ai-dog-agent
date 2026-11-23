@@ -16,3 +16,8 @@ build/android/gen/
 bin
 m3-verify
 *.log
+*.exe
+*.syso
+*.dll
+*.so
+*.dylib

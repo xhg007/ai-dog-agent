@@ -23,6 +23,7 @@ type Manager struct {
 
 	mu      sync.Mutex
 	current map[string]string // sessionID -> 运行中 taskID
+	seq     map[string]int64  // taskID -> checkpoint 序号计数器
 }
 
 // New 创建管理器。store 仅用于读与透传，写入一律走 w。
@@ -32,6 +33,7 @@ func New(s store.Store, w *store.AsyncWriter, bus *eventbus.Bus) *Manager {
 		w:       w,
 		bus:     bus,
 		current: make(map[string]string),
+		seq:     make(map[string]int64),
 	}
 }
 
@@ -95,6 +97,14 @@ func (m *Manager) AppendTokenUsage(u store.TokenUsage) {
 // AppendCheckpoint 异步记录工具检查点（FR-5.3）。
 func (m *Manager) AppendCheckpoint(c store.Checkpoint) {
 	m.submit(func(s store.Store) error { return s.AppendCheckpoint(c) })
+}
+
+// NextCheckpointSeq 返回任务内下一个检查点序号（原子递增）。
+func (m *Manager) NextCheckpointSeq(taskID string) int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.seq[taskID]++
+	return m.seq[taskID]
 }
 
 // LastAfterCheckpoint 读任务最后一个 after 检查点（断点恢复用）。
