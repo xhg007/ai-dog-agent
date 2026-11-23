@@ -79,6 +79,11 @@ func NewManager() (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
+	return NewManagerAt(dir)
+}
+
+// NewManagerAt 在指定目录创建配置管理器（测试或自定义落盘位置用）。
+func NewManagerAt(dir string) (*Manager, error) {
 	m := &Manager{path: filepath.Join(dir, "config.json")}
 	if err := m.load(); err != nil {
 		return nil, err

@@ -193,6 +193,38 @@ func scanCheckpoint(row *sql.Row) (*Checkpoint, error) {
 	return &c, nil
 }
 
+// ErrNoTask 任务不存在。
+var ErrNoTask = fmt.Errorf("任务不存在")
+
+// GetTask 单任务查询。
+func (s *DuckDBStore) GetTask(id string) (*Task, error) {
+	row := s.db.QueryRow(
+		`SELECT id, session_id, title, status, error, created_at, finished_at
+		 FROM tasks WHERE id = ?`, id)
+	var (
+		t          Task
+		finishedAt sql.NullTime
+	)
+	if err := row.Scan(&t.ID, &t.SessionID, &t.Title, &t.Status, &t.Error, &t.CreatedAt, &finishedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrNoTask
+		}
+		return nil, err
+	}
+	if finishedAt.Valid {
+		t.FinishedAt = finishedAt.Time
+	}
+	return &t, nil
+}
+
+// CheckpointBySeq 指定序号检查点查询。
+func (s *DuckDBStore) CheckpointBySeq(taskID string, seq int64) (*Checkpoint, error) {
+	row := s.db.QueryRow(
+		`SELECT id, task_id, seq, phase, tool_name, tool_args, tool_result, messages, created_at
+		 FROM checkpoints WHERE task_id = ? AND seq = ?`, taskID, seq)
+	return scanCheckpoint(row)
+}
+
 // ListTasks 最近任务（created_at 降序）。
 func (s *DuckDBStore) ListTasks(limit int) ([]Task, error) {
 	if limit <= 0 {

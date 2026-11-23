@@ -112,6 +112,14 @@ func (m *Manager) LastAfterCheckpoint(taskID string) (*store.Checkpoint, error) 
 	return m.store.LastAfterCheckpoint(taskID)
 }
 
+// GetTask 单任务查询。
+func (m *Manager) GetTask(id string) (*store.Task, error) { return m.store.GetTask(id) }
+
+// CheckpointBySeq 指定序号检查点查询。
+func (m *Manager) CheckpointBySeq(taskID string, seq int64) (*store.Checkpoint, error) {
+	return m.store.CheckpointBySeq(taskID, seq)
+}
+
 // ListTasks / TaskEvents / DailyUsage 读透传（TaskService RPC 用）。
 func (m *Manager) ListTasks(limit int) ([]store.Task, error)    { return m.store.ListTasks(limit) }
 func (m *Manager) TaskEvents(id string, n int) ([]store.TaskEvent, error) {

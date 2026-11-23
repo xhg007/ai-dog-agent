@@ -59,6 +59,13 @@ export function NewSession(): $CancellablePromise<string> {
 }
 
 /**
+ * RecoverTask 从断点恢复指定任务并续跑（新任务记录，原任务保持中断/失败终态）。
+ */
+export function RecoverTask(taskID: string): $CancellablePromise<void> {
+    return $Call.ByID(3679412190, taskID);
+}
+
+/**
  * RestoreSessions 从磁盘恢复会话（应用启动时调用）。执行中的状态复位为未运行。
  */
 export function RestoreSessions(): $CancellablePromise<void> {

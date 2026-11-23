@@ -77,6 +77,10 @@ type Store interface {
 	AppendCheckpoint(c Checkpoint) error
 	// LastAfterCheckpoint 返回任务最后一个 after 检查点（无则返回 nil, nil）。
 	LastAfterCheckpoint(taskID string) (*Checkpoint, error)
+	// GetTask 返回单个任务（无则 ErrNoTask）。
+	GetTask(id string) (*Task, error)
+	// CheckpointBySeq 返回任务指定序号的检查点（无则 nil, nil）。
+	CheckpointBySeq(taskID string, seq int64) (*Checkpoint, error)
 	ListTasks(limit int) ([]Task, error)
 	// TaskEvents 返回任务的事件流（按时间升序）。
 	TaskEvents(taskID string, limit int) ([]TaskEvent, error)
