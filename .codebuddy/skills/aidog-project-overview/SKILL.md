@@ -16,7 +16,7 @@ description: ai-dog-agent 项目总览与架构地图（M0 骨架：服务装配
 | M2 | 只读工具 + 项目理解（workspace/explorer/go-ast） | ✅ 完成 → `aidog-m2-read-tools` |
 | M3 | 写操作 + 审批（write/edit + 备份回滚） | ✅ 完成 → `aidog-m3-write-approval` |
 | M4 | 执行与修复（run_shell + go 工具 + 白名单） | ✅ 完成 → `aidog-m4-execution-fix` |
-| M5 | 生产化（持久化/中断恢复/Token 统计/OTel） | ⬜ 待开发 |
+| M5 | 生产化（DuckDB 持久化/任务面板/断点恢复/Token 统计/故障切换） | ✅ 完成 → `aidog-m5-productionization` |
 
 **项目惯例：每完成一个功能，必须在 `.codebuddy/skills/` 下新增对应的 `aidog-<功能名>/SKILL.md` 描述 skill，保持新会话可冷启动。**
 

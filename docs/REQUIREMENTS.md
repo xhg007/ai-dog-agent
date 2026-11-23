@@ -225,7 +225,7 @@ ai-dog-agent/
 | **M2 只读工具 + 项目理解** | read/list/search/git_diff + 索引器 + explorer Agent + 理解项目工作流 | FR-1 全部 |
 | **M3 写操作 + 审批** | write/edit + ApprovalManager + 前端审批弹层 + diff 预览 | ✅ 完成（FR-2.2/2.3、FR-4.1、FR-4.3） |
 | **M4 执行与修复** | shell/go_test/go_vet + 白名单 + fixer 循环 + 回滚 | ✅ 完成（FR-3.1/3.2/3.5、FR-4.2、FR-4.5 回滚 UI；FR-3.3/3.4 以提示词驱动修复循环实现，程序化 fixer 子 Agent 延后；FR-4.4 复用 ReviewPanel 实时 diff） |
-| **M5 生产化** | SQLite 持久化、任务管理、中断恢复、Token 统计、OTel、故障切换 | FR-5 全部 |
+| **M5 生产化** | DuckDB 持久化、任务管理、完整断点恢复、Token 统计、故障切换 | ✅ 完成（FR-5.1~5.4/5.6；存储引擎按用户要求改用 DuckDB；OTel OTLP 以 DuckDB 统计替代延后，FR-5.5 结构化日志已有） |
 | **M6 增强（后置）** | tree-sitter 向量检索、MCP Client 接入外部工具、多 workspace 并行 | — |
 
 ---

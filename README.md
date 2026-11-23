@@ -40,4 +40,4 @@ go test ./internal/...
 | M2 只读工具 + 项目理解（workspace 隔离 / explorer 子 Agent / go-ast 索引） | 完成 |
 | M3 写操作 + 审批（write/edit + 审批卡片 + 备份回滚 API） | 完成 |
 | M4 执行与修复（run_shell + go_test/vet/build + 白名单 + 回滚 UI） | 完成 |
-| M5 生产化（持久化/中断恢复/Token 统计/OTel） | 待开发 |
+| M5 生产化（DuckDB 持久化 + 任务面板 + 断点恢复 + Token 统计 + 模型故障切换） | 完成（OTLP tracing 延后，统计走 DuckDB） |
