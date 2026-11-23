@@ -251,11 +251,15 @@ func (s *ChatService) Cancel(sessionID string) bool {
 // initAgentLocked 惰性构建 Agent + Runner（调用方持有锁）。
 func (s *ChatService) initAgentLocked(sess *chatSession) error {
 	ctx := context.Background()
-	mc, err := s.cfg.ActiveModel()
-	if err != nil {
-		return err
-	}
-	cm, err := llm.BuildModel(ctx, mc, sess.agentID)
+	// 带故障切换的模型链（FR-5.6）：激活模型优先，其余按配置顺序备用；
+	// 瞬态错误（网络/429/5xx/超时）自动切换并上报 model_fallback 事件
+	sessionID := sess.id
+	cm, modelName, err := llm.BuildModelChain(ctx, s.cfg, sess.agentID,
+		func(from, to, reason string) {
+			slog.Warn("模型故障切换", "session", sessionID, "from", from, "to", to, "reason", reason)
+			s.bus.Emit(eventbus.Event{Type: eventbus.EvModelFallback, SessionID: sessionID,
+				Data: eventbus.ModelFallbackData{From: from, To: to, Reason: reason}})
+		})
 	if err != nil {
 		return err
 	}
@@ -278,7 +282,7 @@ func (s *ChatService) initAgentLocked(sess *chatSession) error {
 		EnableStreaming: true,
 	})
 	slog.Info("会话 Agent 已构建", "session", sess.id, "agentId", sess.agentID,
-		"model", mc.Model, "bodyField", llm.BodyAgentIDField)
+		"model", modelName, "bodyField", llm.BodyAgentIDField)
 	return nil
 }
 
