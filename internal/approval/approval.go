@@ -1,0 +1,124 @@
+// Package approval 审批管理器：写操作等高风险动作需用户批准。
+// 工具调用方 Request 阻塞等待；前端通过 Wails Service Decide 决策。
+// 支持按会话记住同路径的批准（同一路径本会话内不再询问）。
+package approval
+
+import (
+	"errors"
+	"fmt"
+	"log/slog"
+	"sync"
+
+	"github.com/google/uuid"
+
+	"ai-dog-agent/internal/eventbus"
+)
+
+// ErrDenied 用户拒绝了审批请求。
+var ErrDenied = errors.New("用户拒绝了该操作")
+
+// pendingReq 一次待决策的审批。
+type pendingReq struct {
+	req    eventbus.ApprovalRequestData
+	result chan decision
+}
+
+type decision struct {
+	approved bool
+	remember bool
+}
+
+// Manager 审批管理器。
+type Manager struct {
+	bus        *eventbus.Bus
+	mu         sync.Mutex
+	pending    map[string]*pendingReq
+	remembered map[string]map[string]bool // sessionID -> "tool:path" 集合
+}
+
+// New 创建审批管理器。
+func New(bus *eventbus.Bus) *Manager {
+	return &Manager{
+		bus:        bus,
+		pending:    make(map[string]*pendingReq),
+		remembered: make(map[string]map[string]bool),
+	}
+}
+
+// Request 请求审批：推送事件给前端并阻塞等待决策。
+// 返回 true 表示批准；拒绝返回 ErrDenied。
+// sessionID+tool+path 已被记住时直接放行。
+func (m *Manager) Request(sessionID, tool, path, preview string) (bool, error) {
+	key := tool + ":" + path
+	m.mu.Lock()
+	if m.remembered[sessionID][key] {
+		m.mu.Unlock()
+		slog.Debug("审批命中记住策略，直接放行", "session", sessionID, "tool", tool, "path", path)
+		return true, nil
+	}
+	id := uuid.NewString()
+	pr := &pendingReq{result: make(chan decision, 1)}
+	pr.req = eventbus.ApprovalRequestData{ID: id, SessionID: sessionID, Tool: tool, Path: path, Preview: preview}
+	m.pending[id] = pr
+	m.mu.Unlock()
+
+	m.bus.Emit(eventbus.Event{
+		Type: eventbus.EvApprovalRequest, SessionID: sessionID, Data: pr.req,
+	})
+
+	dec := <-pr.result
+
+	m.mu.Lock()
+	delete(m.pending, id)
+	if dec.approved && dec.remember {
+		if m.remembered[sessionID] == nil {
+			m.remembered[sessionID] = make(map[string]bool)
+		}
+		m.remembered[sessionID][key] = true
+	}
+	m.mu.Unlock()
+
+	m.bus.Emit(eventbus.Event{
+		Type: eventbus.EvApprovalDecided, SessionID: sessionID,
+		Data: eventbus.ApprovalDecidedData{ID: id, Approved: dec.approved},
+	})
+
+	if !dec.approved {
+		return false, fmt.Errorf("%w: %s %s", ErrDenied, tool, path)
+	}
+	return true, nil
+}
+
+// Decide 用户决策（Wails Service 调用）。
+func (m *Manager) Decide(id string, approved, remember bool) error {
+	m.mu.Lock()
+	pr, ok := m.pending[id]
+	m.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("审批请求不存在或已处理: %s", id)
+	}
+	pr.result <- decision{approved: approved, remember: remember}
+	return nil
+}
+
+// ListPending 返回全部待审批请求。
+func (m *Manager) ListPending() []eventbus.ApprovalRequestData {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	list := make([]eventbus.ApprovalRequestData, 0, len(m.pending))
+	for _, pr := range m.pending {
+		list = append(list, pr.req)
+	}
+	return list
+}
+
+// pendingIDs 测试辅助：当前待审批 ID 列表。
+func (m *Manager) pendingIDs() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ids := make([]string, 0, len(m.pending))
+	for id := range m.pending {
+		ids = append(ids, id)
+	}
+	return ids
+}

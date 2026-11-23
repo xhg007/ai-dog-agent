@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=My Product
+Comment=A ai-dog-agent application
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/ai-dog-agent.exe %u
+Terminal=false
+Type=Application
+Icon=ai-dog-agent.exe
+Categories=Utility;
+StartupWMClass=ai-dog-agent.exe
+
+ 
