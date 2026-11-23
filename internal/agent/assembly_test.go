@@ -87,7 +87,7 @@ func TestBuildExplorerAgent(t *testing.T) {
 
 func TestBuildOrchestratorWithExplorer(t *testing.T) {
 	ws := setupProjectWS(t)
-	ag, err := BuildOrchestrator(context.Background(), ws, &fakeModel{}, nil, "", "")
+	ag, err := BuildOrchestrator(context.Background(), ws, &fakeModel{}, nil, "", "", nil)
 	if err != nil {
 		t.Fatalf("BuildOrchestrator 失败: %v", err)
 	}
@@ -99,11 +99,34 @@ func TestBuildOrchestratorWithExplorer(t *testing.T) {
 func TestBuildOrchestratorWithWriteTools(t *testing.T) {
 	ws := setupProjectWS(t)
 	appr := approval.New(eventbus.New())
-	ag, err := BuildOrchestrator(context.Background(), ws, &fakeModel{}, appr, t.TempDir(), "s-test")
+	ag, err := BuildOrchestrator(context.Background(), ws, &fakeModel{}, appr, t.TempDir(), "s-test", nil)
 	if err != nil {
 		t.Fatalf("BuildOrchestrator(含写工具) 失败: %v", err)
 	}
 	if ag == nil {
 		t.Fatal("orchestrator agent 为空")
+	}
+}
+
+// TestOrchestratorToolsIncludeExecTools 主 Agent 工具集应包含执行类工具（M4）。
+func TestOrchestratorToolsIncludeExecTools(t *testing.T) {
+	ws := setupProjectWS(t)
+	appr := approval.New(eventbus.New())
+	toolList, err := OrchestratorTools(context.Background(), ws, &fakeModel{}, appr, t.TempDir(), "s-test", []string{"go", "git"})
+	if err != nil {
+		t.Fatalf("OrchestratorTools 失败: %v", err)
+	}
+	names := map[string]bool{}
+	for _, tl := range toolList {
+		info, err := tl.Info(context.Background())
+		if err != nil {
+			t.Fatalf("Info 失败: %v", err)
+		}
+		names[info.Name] = true
+	}
+	for _, want := range []string{"run_shell", "go_test", "go_vet", "go_build", "write_file", "edit_file"} {
+		if !names[want] {
+			t.Fatalf("主 Agent 工具集缺少 %s，实际: %v", want, names)
+		}
 	}
 }

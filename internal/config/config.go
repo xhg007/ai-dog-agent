@@ -45,11 +45,12 @@ type MCPServerConfig struct {
 
 // Config 应用配置根对象。
 type Config struct {
-	Models        []ModelConfig     `json:"models"`
-	ActiveModelID string            `json:"activeModelId"`
-	WorkspacePath string            `json:"workspacePath,omitempty"` // 上次使用的工作区
-	Skills        []SkillConfig     `json:"skills"`
-	MCPServers    []MCPServerConfig `json:"mcpServers"`
+	Models         []ModelConfig     `json:"models"`
+	ActiveModelID  string            `json:"activeModelId"`
+	WorkspacePath  string            `json:"workspacePath,omitempty"` // 上次使用的工作区
+	Skills         []SkillConfig     `json:"skills"`
+	MCPServers     []MCPServerConfig `json:"mcpServers"`
+	ShellWhitelist []string          `json:"shellWhitelist,omitempty"` // run_shell 允许的程序名（未配置时回退默认）
 }
 
 // Manager 配置管理器，线程安全。
@@ -103,7 +104,13 @@ func (m *Manager) load() error {
 }
 
 func defaultConfig() Config {
-	return Config{Models: []ModelConfig{}, ActiveModelID: ""}
+	return Config{Models: []ModelConfig{}, ActiveModelID: "", ShellWhitelist: DefaultShellWhitelist()}
+}
+
+// DefaultShellWhitelist 默认 Shell 白名单（spec 3.3：go 只读子命令、git 只读子命令、目录列表）。
+// go/git 的子命令级限制在 tools.ShellRun 内部强制执行。
+func DefaultShellWhitelist() []string {
+	return []string{"go", "git", "dir", "ls"}
 }
 
 // Get 返回配置副本。
@@ -148,6 +155,16 @@ func (m *Manager) ActiveModel() (ModelConfig, error) {
 	return ModelConfig{}, errors.New("未配置可用模型，请先在设置页添加并选择模型")
 }
 
+// ShellWhitelist 返回生效的 Shell 白名单（未配置时回退默认值），返回副本。
+func (m *Manager) ShellWhitelist() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if len(m.cfg.ShellWhitelist) == 0 {
+		return DefaultShellWhitelist()
+	}
+	return append([]string(nil), m.cfg.ShellWhitelist...)
+}
+
 func clone(c Config) Config {
 	out := c
 	out.Models = make([]ModelConfig, len(c.Models))
@@ -159,5 +176,6 @@ func clone(c Config) Config {
 		out.MCPServers[i] = s
 		out.MCPServers[i].Args = append([]string(nil), s.Args...)
 	}
+	out.ShellWhitelist = append([]string(nil), c.ShellWhitelist...)
 	return out
 }

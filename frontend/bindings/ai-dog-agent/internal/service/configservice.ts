@@ -26,6 +26,7 @@ export function DeleteProjectAgent(name: string): $CancellablePromise<void> {
 
 /**
  * GetConfig 返回当前配置（含模型 / Skills / MCP Server）。
+ * ShellWhitelist 为空时填充默认白名单，保证前端设置页展示生效值。
  */
 export function GetConfig(): $CancellablePromise<config$0.Config> {
     return $Call.ByID(3004103843);

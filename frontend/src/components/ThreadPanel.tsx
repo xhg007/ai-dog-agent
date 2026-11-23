@@ -27,6 +27,8 @@ const toolIcons: Record<string, string> = {
   read_file: '📄', list_files: '📁', search_code: '🔍',
   git_diff: '🌿', git_status: '🌿', project_summary: '🧭',
   dispatch_explorer: '🧭',
+  write_file: '✏️', edit_file: '✏️',
+  run_shell: '⌨️', go_test: '🧪', go_vet: '🔬', go_build: '🔨',
 }
 
 export default function ThreadPanel({ activeId, activeTitle, wsPath, onThreadsChanged, pendingApprovals, onApprovalDone }: {

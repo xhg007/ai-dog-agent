@@ -39,5 +39,5 @@ go test ./internal/...
 | M1 对话内核（llm 工厂 + Eino ADK Runner + 事件流） | 完成 |
 | M2 只读工具 + 项目理解（workspace 隔离 / explorer 子 Agent / go-ast 索引） | 完成 |
 | M3 写操作 + 审批（write/edit + 审批卡片 + 备份回滚 API） | 完成 |
-| M4 执行与修复 | 待开发 |
+| M4 执行与修复（run_shell + go_test/vet/build + 白名单 + 回滚 UI） | 完成 |
 | M5 生产化（持久化/中断恢复/Token 统计/OTel） | 待开发 |

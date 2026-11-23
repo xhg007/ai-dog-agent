@@ -99,3 +99,54 @@ func TestGetReturnsIndependentCopyOfNewSlices(t *testing.T) {
 		t.Fatal("Get 应返回深拷贝，修改返回值不得污染内部配置")
 	}
 }
+
+// --- Shell 白名单（M4 FR-4.2） ---
+
+func TestDefaultShellWhitelist(t *testing.T) {
+	m := &Manager{path: filepath.Join(t.TempDir(), "config.json")}
+	m.cfg = defaultConfig()
+	got := m.ShellWhitelist()
+	want := []string{"go", "git", "dir", "ls"}
+	if len(got) != len(want) {
+		t.Fatalf("默认白名单应为 %v，got %v", want, got)
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Fatalf("默认白名单第 %d 项应为 %q，got %q", i, w, got[i])
+		}
+	}
+}
+
+func TestShellWhitelist_FallbackAndSave(t *testing.T) {
+	dir := t.TempDir()
+	m := &Manager{path: filepath.Join(dir, "config.json")}
+	m.cfg = defaultConfig()
+
+	// 用户配置了空列表 → 回退默认值
+	if wl := m.ShellWhitelist(); len(wl) != 4 {
+		t.Fatalf("未配置时应回退默认白名单，got %v", wl)
+	}
+
+	cfg := m.Get()
+	cfg.ShellWhitelist = []string{"go", "python"}
+	if err := m.Save(cfg); err != nil {
+		t.Fatalf("Save 失败: %v", err)
+	}
+	m2 := &Manager{path: filepath.Join(dir, "config.json")}
+	if err := m2.load(); err != nil {
+		t.Fatalf("重新加载失败: %v", err)
+	}
+	got := m2.ShellWhitelist()
+	if len(got) != 2 || got[0] != "go" || got[1] != "python" {
+		t.Fatalf("自定义白名单回读不符: %v", got)
+	}
+}
+
+func TestCloneShellWhitelistIndependent(t *testing.T) {
+	m := &Manager{cfg: defaultConfig()}
+	got := m.Get()
+	got.ShellWhitelist[0] = "被修改"
+	if m.cfg.ShellWhitelist[0] == "被修改" {
+		t.Fatal("clone 应深拷贝 ShellWhitelist，修改返回值不得污染内部配置")
+	}
+}

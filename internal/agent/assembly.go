@@ -127,9 +127,10 @@ func BuildExplorer(ctx context.Context, ws *workspace.Manager, cm model.BaseChat
 	})
 }
 
-// OrchestratorTools 主 Agent 工具：分派 explorer 子 Agent + 写操作（审批门）。
+// OrchestratorTools 主 Agent 工具：分派 explorer 子 Agent + 写操作（审批门）+ 执行类工具（M4）。
+// whitelist 为 Shell 白名单（run_shell 白名单内免审批；go_test/go_vet/go_build 免审批）。
 func OrchestratorTools(ctx context.Context, ws *workspace.Manager, cm model.BaseChatModel,
-	appr *approval.Manager, backupRoot, sessionID string) ([]tool.BaseTool, error) {
+	appr *approval.Manager, backupRoot, sessionID string, whitelist []string) ([]tool.BaseTool, error) {
 	explorer, err := BuildExplorer(ctx, ws, cm)
 	if err != nil {
 		return nil, fmt.Errorf("构建 explorer 子 Agent 失败: %w", err)
@@ -140,13 +141,25 @@ func OrchestratorTools(ctx context.Context, ws *workspace.Manager, cm model.Base
 	if appr != nil {
 		toolList = append(toolList, tools.WriteToolset(ws, backupRoot, appr, sessionID)...)
 	}
+	// Go 构建工具（go_test / go_vet / go_build）：白名单内免审批（FR-3.1/3.2）
+	toolList = append(toolList, tools.GoToolset(ws)...)
+	// run_shell：白名单内免审批，白名单外经审批门（FR-4.2）
+	shellTool, err := utils.InferTool("run_shell",
+		"在项目工作区内执行 Shell 命令。白名单内命令免审批直接执行；白名单外命令需用户审批。命令不经 shell 解释（无注入面）。",
+		func(ctx context.Context, args tools.ShellArgs) (string, error) {
+			return tools.ShellRun(ws, whitelist, appr, sessionID, args.Command)
+		})
+	if err != nil {
+		return nil, fmt.Errorf("注册 run_shell 工具失败: %w", err)
+	}
+	toolList = append(toolList, shellTool)
 	return toolList, nil
 }
 
-// BuildOrchestrator 构建主 Agent（含 explorer 分派工具 + 写操作审批工具）。
+// BuildOrchestrator 构建主 Agent（含 explorer 分派工具 + 写操作审批工具 + 执行工具）。
 func BuildOrchestrator(ctx context.Context, ws *workspace.Manager, cm model.BaseChatModel,
-	appr *approval.Manager, backupRoot, sessionID string, extras ...string) (adk.Agent, error) {
-	orchTools, err := OrchestratorTools(ctx, ws, cm, appr, backupRoot, sessionID)
+	appr *approval.Manager, backupRoot, sessionID string, whitelist []string, extras ...string) (adk.Agent, error) {
+	orchTools, err := OrchestratorTools(ctx, ws, cm, appr, backupRoot, sessionID, whitelist)
 	if err != nil {
 		return nil, err
 	}

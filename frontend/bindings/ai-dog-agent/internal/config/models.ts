@@ -14,6 +14,11 @@ export interface Config {
     "workspacePath"?: string;
     "skills": SkillConfig[] | null;
     "mcpServers": MCPServerConfig[] | null;
+
+    /**
+     * run_shell 允许的程序名（未配置时回退默认）
+     */
+    "shellWhitelist"?: string[] | null;
 }
 
 /**

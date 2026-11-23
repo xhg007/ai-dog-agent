@@ -18,8 +18,13 @@ func NewConfigService(mgr *config.Manager, ws *workspace.Manager) *ConfigService
 }
 
 // GetConfig 返回当前配置（含模型 / Skills / MCP Server）。
+// ShellWhitelist 为空时填充默认白名单，保证前端设置页展示生效值。
 func (c *ConfigService) GetConfig() config.Config {
-	return c.mgr.Get()
+	cfg := c.mgr.Get()
+	if len(cfg.ShellWhitelist) == 0 {
+		cfg.ShellWhitelist = config.DefaultShellWhitelist()
+	}
+	return cfg
 }
 
 // SaveConfig 保存配置。

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Events } from '@wailsio/runtime'
-import { WorkspaceService } from '../../bindings/ai-dog-agent/internal/service/index.js'
+import { ApprovalService, WorkspaceService } from '../../bindings/ai-dog-agent/internal/service/index.js'
 
 type Tab = 'diff' | 'files'
 
@@ -51,6 +51,18 @@ export default function ReviewPanel({ wsPath, refreshTick }: { wsPath: string; r
     return () => { off() }
   }, [refresh])
 
+  // 失败回滚（FR-4.5）：从写前备份恢复单个文件
+  const rollback = async (path: string) => {
+    if (!confirm(`将 ${path} 回滚到写前备份？\n（该文件必须在本会话中被 Agent 修改过，否则无备份可回）`)) return
+    setError('')
+    try {
+      await ApprovalService.RollbackFile(path)
+      refresh()
+    } catch (err: any) {
+      setError(typeof err === 'string' ? err : err?.message ?? String(err))
+    }
+  }
+
   const changes = parseStatus(status)
 
   return (
@@ -81,6 +93,11 @@ export default function ReviewPanel({ wsPath, refreshTick }: { wsPath: string; r
                   <li key={i} className="file-item">
                     <span className={`status-badge s-${c.status}`}>{c.status}</span>
                     <span className="file-path" title={c.path}>{c.path}</span>
+                    <button
+                      className="rollback-btn"
+                      title="回滚到写前备份（仅对本会话中被修改过的文件有效）"
+                      onClick={() => rollback(c.path)}
+                    >↩ 回滚</button>
                   </li>
                 ))}
               </ul>

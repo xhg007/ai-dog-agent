@@ -235,8 +235,8 @@ func (s *ChatService) initAgentLocked(sess *chatSession) error {
 	extras := s.buildDynamicExtras()
 	var ag adk.Agent
 	if s.ws.IsSet() {
-		// workspace 已设置：主 Agent 携带 explorer 分派工具 + 写操作审批工具
-		ag, err = BuildOrchestrator(ctx, s.ws, cm, s.appr, s.backupRoot, sess.id, extras)
+		// workspace 已设置：主 Agent 携带 explorer 分派工具 + 写操作审批工具 + 执行工具
+		ag, err = BuildOrchestrator(ctx, s.ws, cm, s.appr, s.backupRoot, sess.id, s.cfg.ShellWhitelist(), extras)
 	} else {
 		// 未设置 workspace：纯对话模式
 		ag, err = newPlainOrchestrator(ctx, cm, extras)

@@ -44,11 +44,12 @@ interface AppConfig {
   activeModelId: string
   skills: SkillConfig[]
   mcpServers: MCPServerConfig[]
+  shellWhitelist: string[]
 }
 
-type Tab = 'models' | 'skills' | 'mcp' | 'agents'
+type Tab = 'models' | 'skills' | 'mcp' | 'agents' | 'security'
 
-const emptyAppConfig: AppConfig = { models: [], activeModelId: '', skills: [], mcpServers: [] }
+const emptyAppConfig: AppConfig = { models: [], activeModelId: '', skills: [], mcpServers: [], shellWhitelist: [] }
 
 function fromAgentSpec(s: any): AgentSpec {
   return {
@@ -97,6 +98,7 @@ function SettingsPanel() {
       models: c.models ?? [],
       activeModelId: c.activeModelId ?? '',
       skills: c.skills ?? [],
+      shellWhitelist: c.shellWhitelist ?? [],
       mcpServers: (c.mcpServers ?? []).map((m: any) => ({
         ...m,
         args: (m.args ?? []).join(', '),
@@ -131,6 +133,15 @@ function SettingsPanel() {
 
   const updateAgent = (i: number, p: Partial<AgentSpec>) =>
     setAgents(a => a.map((x, j) => j === i ? { ...x, ...p } : x))
+
+  const [newWhitelistEntry, setNewWhitelistEntry] = useState('')
+
+  const addWhitelistEntry = () => {
+    const v = newWhitelistEntry.trim()
+    if (!v || cfg.shellWhitelist.includes(v)) return
+    patch({ shellWhitelist: [...cfg.shellWhitelist, v] })
+    setNewWhitelistEntry('')
+  }
 
   const saveConfig = async () => {
     setError('')
@@ -177,6 +188,7 @@ function SettingsPanel() {
     { id: 'skills', label: `Skills (${cfg.skills.length})` },
     { id: 'mcp', label: `MCP (${cfg.mcpServers.length})` },
     { id: 'agents', label: `项目 Agent (${agents.length})` },
+    { id: 'security', label: '安全' },
   ]
 
   return (
@@ -388,6 +400,40 @@ function SettingsPanel() {
                 tools: '', skills: '', mcp_servers: '', max_turns: 0,
               }])}>添加 Agent</button>
               <button className="btn" disabled={!agentDir} onClick={saveAgents}>{saved ? '已保存' : '保存 Agent 配置'}</button>
+            </div>
+          </>
+        )}
+
+        {tab === 'security' && (
+          <>
+            <h3>Shell 白名单</h3>
+            <p className="hint">
+              run_shell 白名单内的命令免审批直接执行；白名单外命令需用户批准。
+              go 仅放行 build/test/vet/fmt/version，git 仅放行 status/diff/log/show/branch，其余子命令一律需审批（不受白名单影响）。
+              保存后新建会话生效。
+            </p>
+            {cfg.shellWhitelist.length === 0 && <p className="hint">白名单为空：所有 run_shell 命令都需审批。</p>}
+            <div className="whitelist-list">
+              {cfg.shellWhitelist.map((w, i) => (
+                <div key={w} className="whitelist-row">
+                  <code className="whitelist-name">{w}</code>
+                  <button className="btn danger" onClick={() =>
+                    patch({ shellWhitelist: cfg.shellWhitelist.filter((_, j) => j !== i) })
+                  }>删除</button>
+                </div>
+              ))}
+            </div>
+            <div className="row-actions">
+              <input
+                className="input"
+                style={{ maxWidth: 220 }}
+                placeholder="程序名，如 node"
+                value={newWhitelistEntry}
+                onChange={e => setNewWhitelistEntry(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') addWhitelistEntry() }}
+              />
+              <button className="btn secondary" onClick={addWhitelistEntry}>添加</button>
+              <button className="btn" onClick={saveConfig}>{saved ? '已保存' : '保存配置'}</button>
             </div>
           </>
         )}
