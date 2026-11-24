@@ -32,14 +32,62 @@ body {
   overflow: hidden;
 }
 
-/* ============ 三栏骨架 ============ */
+/* ============ 三栏骨架（无边框窗口：首行为自定义标题栏） ============ */
 .app {
   display: grid;
   grid-template-columns: 240px 1fr 340px;
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-rows: 36px minmax(0, 1fr);
   height: 100vh;
   min-height: 0;
   overflow: hidden;
+}
+
+/* ============ 自定义标题栏（无边框窗口） ============ */
+.titlebar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+  padding-left: 14px;
+  background: var(--bg-canvas);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+  --wails-draggable: drag;
+}
+
+.titlebar-title {
+  font-size: 12px;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+.titlebar-controls {
+  display: flex;
+  height: 100%;
+}
+
+.win-btn {
+  width: 46px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  --wails-draggable: no-drag;
+}
+
+.win-btn:hover {
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+
+.win-btn.close:hover {
+  background: #c42b1c;
+  color: #fff;
 }
 
 /* ============ 左栏（项目 + 线程） ============ */

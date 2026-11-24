@@ -51,6 +51,8 @@ frontend/bindings/       自动生成的 TS 绑定（勿手改）
 
 `App.tsx` 组装三栏：`Sidebar`（项目+线程列表+⚙ 设置入口 `side-footer`）+ `ThreadPanel`（对话流+Composer 输入框）+ `ReviewPanel`（Diff/文件审查）；设置弹层 `overlay` 内嵌 `SettingsPanel`。事件经 `Events.On("agent:event")` 消费。样式在 `src/styles.css`——三栏骨架依赖 `min-height:0` 约束链，改动布局时保持 `.app`(grid) → `.thread-col/.thread` → `.chat-messages` 的收缩链完整，否则长内容会把底部 Composer/设置按钮顶出视口。
 
+**无边框窗口（M5 追加）**：main.go 窗口选项 `Frameless: true`（无系统标题栏/边框）；顶部 36px 标题栏为跨三列的 grid 首行，由 `frontend/src/components/TitleBar.tsx` 提供——整条 `--wails-draggable: drag` 拖拽区，右侧最小化/最大化/关闭按钮 `no-drag`，走 `@wailsio/runtime` 的 `Window.Minimise/Maximise/Restore/Close`。改动标题栏后需同步 `styles.css` 的 `.titlebar/.win-btn` 与 `.app` 的 `grid-template-rows: 36px ...`（内容行高 = 100vh - 36px，收缩链从 `.app` 首行之后开始）。
+
 ## 绑定（frontend/bindings/）
 
 由 wails3 CLI 从 Go Service 生成，镜像包结构（`internal/agent/chatservice.ts`、`internal/service/*.ts`、`events/index.ts`）。**勿手改**；改了 Go Service 后重新生成（见 `wails3` skill 的 `references/bindings.md`）。

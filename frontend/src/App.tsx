@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Events } from '@wailsio/runtime'
+import TitleBar from './components/TitleBar'
 import Sidebar, { SideView } from './components/Sidebar'
 import ThreadPanel from './components/ThreadPanel'
 import ReviewPanel from './components/ReviewPanel'
@@ -131,6 +132,7 @@ function App() {
 
   return (
     <div className="app">
+      <TitleBar />
       <Sidebar
         threads={threads}
         activeId={activeId}

@@ -86,9 +86,14 @@ func main() {
 	application.RegisterEvent[eventbus.Event](eventbus.EventName)
 
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:  "ai-dog-agent",
-		Width:  1400,
-		Height: 900,
+		Title:     "ai-dog-agent",
+		Width:     1400,
+		Height:    900,
+		MinWidth:  900,
+		MinHeight: 600,
+		// 无边框窗口：标题栏由前端 TitleBar 组件提供
+		//（拖拽区 --wails-draggable + 最小化/最大化/关闭按钮走 @wailsio/runtime Window API）
+		Frameless: true,
 		Mac: application.MacWindow{
 			InvisibleTitleBarHeight: 50,
 			Backdrop:                application.MacBackdropTranslucent,
