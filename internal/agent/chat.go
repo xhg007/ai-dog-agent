@@ -99,7 +99,7 @@ func NewChatService(cfg *config.Manager, ws *workspace.Manager, bus *eventbus.Bu
 // NewSession 创建新会话，返回会话 ID。Agent 实例在首次发消息时惰性构建。
 func (s *ChatService) NewSession() string {
 	id := uuid.NewString()
-	agentID := uuid.NewString() // 每个会话对应一个独立 Agent 实例，拥有唯一 ID
+	agentID := uuid.NewString() // 占位；首次构建 Agent 时固化为随项目的稳定 ID（identity.go）
 	now := time.Now()
 	s.mu.Lock()
 	s.sessions[id] = &chatSession{id: id, agentID: agentID, createdAt: now, lastActive: now}
@@ -251,6 +251,10 @@ func (s *ChatService) Cancel(sessionID string) bool {
 // initAgentLocked 惰性构建 Agent + Runner（调用方持有锁）。
 func (s *ChatService) initAgentLocked(sess *chatSession) error {
 	ctx := context.Background()
+	// 主 Agent ID 随项目固化：同一项目恒定（不再随会话轮换），
+	// 供应商侧相同 agent_id 才能复用缓存
+	sess.agentID = s.agentIDForProject()
+	s.persistLocked(sess)
 	// 带故障切换的模型链（FR-5.6）：激活模型优先，其余按配置顺序备用；
 	// 瞬态错误（网络/429/5xx/超时）自动切换并上报 model_fallback 事件
 	sessionID := sess.id

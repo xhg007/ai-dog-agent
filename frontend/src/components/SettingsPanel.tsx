@@ -29,6 +29,7 @@ interface MCPServerConfig {
 }
 
 interface AgentSpec {
+  agent_id: string     // 唯一不变 ID（UUID 无连字符），保存时后端自动生成固化
   name: string
   description: string
   system_prompt: string
@@ -55,6 +56,7 @@ const emptyAppConfig: AppConfig = { models: [], activeModelId: '', skills: [], m
 
 function fromAgentSpec(s: any): AgentSpec {
   return {
+    agent_id: s.agent_id ?? '',
     name: s.name ?? '',
     description: s.description ?? '',
     system_prompt: s.system_prompt ?? '',
@@ -69,6 +71,7 @@ function fromAgentSpec(s: any): AgentSpec {
 function toAgentSpec(a: AgentSpec) {
   const list = (v: string) => v.split(',').map(s => s.trim()).filter(Boolean)
   return {
+    agent_id: a.agent_id, // 回传后端沿用；后端对缺失/新配置自动生成固化
     name: a.name.trim(),
     description: a.description,
     system_prompt: a.system_prompt,
@@ -356,7 +359,7 @@ function SettingsPanel() {
             <h3>项目自定义 Agent（配置随项目走）</h3>
             <p className="hint">
               目录：{agentDir || '未设置工作区，请先在左侧「项目」选择目录'}<br />
-              每个 Agent 对应一个 .json 文件，Schema：name / description / system_prompt / model / tools / skills / mcp_servers / max_turns。<br />
+              每个 Agent 对应一个 .json 文件，Schema：agent_id（自动生成固化，唯一不变）/ name / description / system_prompt / model / tools / skills / mcp_servers / max_turns。<br />
               当前版本把定义注入主 Agent 上下文；按配置分派执行（独立上下文 / skill / MCP 工具集）在后续里程碑接入。保存后新建会话生效。
             </p>
             {!agentDir && <p className="hint">设置工作区后即可添加项目级 Agent。</p>}
@@ -394,12 +397,15 @@ function SettingsPanel() {
                     <button className="btn danger" onClick={() => removeAgent(i)}>删除</button>
                   </div>
                 </div>
-                <div className="meta">{a.name || '未命名'}.json</div>
+                <div className="meta">
+                  {a.name || '未命名'}.json
+                  {a.agent_id && <div className="agent-id">{a.agent_id}</div>}
+                </div>
               </div>
             ))}
             <div className="row-actions">
               <button className="btn secondary" disabled={!agentDir} onClick={() => setAgents(a => [...a, {
-                name: '', description: '', system_prompt: '', model: '',
+                agent_id: '', name: '', description: '', system_prompt: '', model: '',
                 tools: '', skills: '', mcp_servers: '', max_turns: 0,
               }])}>添加 Agent</button>
               <button className="btn" disabled={!agentDir} onClick={saveAgents}>{saved ? '已保存' : '保存 Agent 配置'}</button>

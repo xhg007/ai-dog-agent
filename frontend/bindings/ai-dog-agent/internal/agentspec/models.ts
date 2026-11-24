@@ -3,8 +3,11 @@
 
 /**
  * Spec 子 Agent 定义（需求文档 §3.1 约定的 Schema）。
+ * AgentID 是该子 Agent 的唯一不变 ID（UUID 无连字符）：
+ * 保存时缺省自动生成并固化；后续实例化/归因/缓存均以此为准。
  */
 export interface Spec {
+    "agent_id"?: string;
     "name": string;
     "description": string;
     "system_prompt": string;

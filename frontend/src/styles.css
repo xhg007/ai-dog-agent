@@ -744,6 +744,14 @@ body {
   font-weight: 600;
 }
 
+/* ===== M5：项目 Agent 稳定 ID 展示 ===== */
+.agent-id {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  word-break: break-all;
+}
+
 /* ===== M5：模型切换系统提示 ===== */
 .msg.system {
   font-size: 11px;

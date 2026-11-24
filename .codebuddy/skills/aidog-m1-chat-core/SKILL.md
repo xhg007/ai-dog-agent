@@ -9,6 +9,8 @@ description: ai-dog-agent 对话内核（M1）：LLM 模型工厂、ChatService 
 
 `BuildModel(ctx, mc, agentID)` 按 OpenAI 兼容 `ModelConfig` 构建 Eino ChatModel；请求体注入自定义字段 `agent_id` / `user_id`（常量 `BodyAgentIDField`、`BodyUserIDField`，用于限流归因与追踪）。
 
+**Agent ID 语义（M5 起改为随项目固化，internal/agent/identity.go）**：主 Agent ID 不再随会话轮换——`initAgentLocked` 每次构建时经 `agentIDForProject()` 取稳定 ID：workspace 已设置 → `<ws>/.aidog/agent_id`；否则 → 应用级 `%AppData%/ai-dog-agent/agent_id`。同一项目恒定，供应商侧只有相同 agent_id 才能复用缓存；旧会话记录在下次构建 Agent 时自动迁移。ID 格式为 32 位无连字符 UUID（`agentspec.NewAgentID`）。
+
 ## 会话服务（internal/agent/chat.go）
 
 `ChatService` 是 Wails Service：cfg/ws/bus/appr/backupRoot/store。每个会话一个 `chatSession`（agent/runner/cancel/running/title/messages），`adk.ChatModelAgent` + `adk.Runner`（`EnableStreaming: true`），惰性构建（`initAgentLocked`）。

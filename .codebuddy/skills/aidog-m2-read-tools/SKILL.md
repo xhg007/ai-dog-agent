@@ -31,7 +31,9 @@ description: ai-dog-agent 只读工具与项目理解（M2）：workspace 路径
 
 ## 项目级子 Agent 配置（internal/agentspec/agentspec.go）
 
-`Spec`（name/system_prompt/tools/skills/mcp_servers/max_turns）读写 `<workspace>/.aidog/agents/*.json`，`Save/List/Delete/Dir` + `validate`。RPC 在 `ConfigService.GetProjectAgents/SaveProjectAgent/DeleteProjectAgent`；启用的 spec 摘要经 `ChatService.buildDynamicExtras` 追加进主 Agent 提示词尾部。
+`Spec`（agent_id/name/system_prompt/tools/skills/mcp_servers/max_turns）读写 `<workspace>/.aidog/agents/*.json`，`Save/List/Delete/Dir` + `validate`。RPC 在 `ConfigService.GetProjectAgents/SaveProjectAgent/DeleteProjectAgent`；启用的 spec 摘要经 `ChatService.buildDynamicExtras` 追加进主 Agent 提示词尾部。
+
+**稳定 agent_id（M5 追加，agent_id.go）**：每个配置文件含唯一不变 `agent_id`（32 位无连字符 UUID）。`Save` 缺省时自动生成固化，**已有同名配置沿用其 ID**（前端编辑不回传 ID 也不换）；`List` 对手工配置缺失项自动迁移写回。项目主 Agent ID 固化在 `<workspace>/.aidog/agent_id`（`EnsureAgentID`/`EnsureIDInFile(path)` 通用读取或生成）。
 
 ## 修改时的注意点
 
