@@ -1,3 +1,9 @@
+/* 按钮文字：关闭 ClearType 次像素平滑，避免深色底上粗体中文出现彩色描边/重影 */
+button[data-slot="button"] {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
 /* ============ 设计令牌（桥接到 shadcn/ui 主题——单一主题源在 index.css） ============ */
 :root {
   --bg-canvas: var(--background);            /* 最深底色（右栏/侧栏底部） */
