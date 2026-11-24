@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Events } from '@wailsio/runtime'
-import { X } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import TitleBar from './components/TitleBar'
@@ -24,7 +24,7 @@ function App() {
   const [threads, setThreads] = useState<ThreadInfo[]>([])
   const [activeId, setActiveId] = useState<string>('')
   const [wsPath, setWsPath] = useState<string>('')
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [page, setPage] = useState<'chat' | 'settings'>('chat')
   const [sideView, setSideView] = useState<SideView>('threads')
   const [reviewTick, setReviewTick] = useState(0)
   const [approvalsByThread, setApprovalsByThread] = useState<Record<string, PendingApproval[]>>({})
@@ -129,43 +129,44 @@ function App() {
         wsPath={wsPath}
         sideView={sideView}
         onSideView={setSideView}
-        onSelect={setActiveId}
+        onSelect={id => { setActiveId(id); setPage('chat') }}
         onNew={newThread}
         onDelete={deleteThread}
         onBrowseWorkspace={browseWorkspace}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSettings={() => setPage(p => (p === 'settings' ? 'chat' : 'settings'))}
       />
       <main className="thread-col">
-        <ThreadPanel
-          activeId={activeId}
-          activeTitle={threads.find(t => t.id === activeId)?.title ?? ''}
-          wsPath={wsPath}
-          onThreadsChanged={refreshThreads}
-          pendingApprovals={approvalsByThread[activeId] ?? []}
-          onApprovalDone={id => setApprovalsByThread(m => {
-            const next: Record<string, PendingApproval[]> = {}
-            for (const [sid, list] of Object.entries(m)) {
-              const rest = list.filter(a => a.id !== id)
-              if (rest.length > 0) next[sid] = rest
-            }
-            return next
-          })}
-        />
-      </main>
-      <ReviewPanel wsPath={wsPath} refreshTick={reviewTick} />
-      {settingsOpen && (
-        <div className="overlay" onClick={() => setSettingsOpen(false)}>
-          <div className="overlay-panel" onClick={e => e.stopPropagation()}>
-            <div className="overlay-header">
-              <span>设置</span>
-              <Button variant="ghost" size="sm" onClick={() => setSettingsOpen(false)}><X className="size-3.5" /> 关闭</Button>
-            </div>
-            <div className="overlay-body">
+        {page === 'settings' ? (
+          <div className="settings-page">
+            <header className="settings-page-header">
+              <h2>设置</h2>
+              <Button variant="ghost" size="sm" onClick={() => setPage('chat')}>
+                <ArrowLeft className="size-3.5" /> 返回对话
+              </Button>
+            </header>
+            <div className="settings-page-body">
               <SettingsPanel />
             </div>
           </div>
-        </div>
-      )}
+        ) : (
+          <ThreadPanel
+            activeId={activeId}
+            activeTitle={threads.find(t => t.id === activeId)?.title ?? ''}
+            wsPath={wsPath}
+            onThreadsChanged={refreshThreads}
+            pendingApprovals={approvalsByThread[activeId] ?? []}
+            onApprovalDone={id => setApprovalsByThread(m => {
+              const next: Record<string, PendingApproval[]> = {}
+              for (const [sid, list] of Object.entries(m)) {
+                const rest = list.filter(a => a.id !== id)
+                if (rest.length > 0) next[sid] = rest
+              }
+              return next
+            })}
+          />
+        )}
+      </main>
+      <ReviewPanel wsPath={wsPath} refreshTick={reviewTick} />
     </div>
     </TooltipProvider>
   )
