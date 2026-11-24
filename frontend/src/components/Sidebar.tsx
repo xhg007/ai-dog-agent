@@ -1,6 +1,5 @@
 import { FolderOpen, MessageSquare, Plus, Settings, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ThreadInfo } from '../App'
@@ -19,7 +18,6 @@ interface Props {
   onDelete: (id: string) => void
   onBrowseWorkspace: () => void
   onOpenSettings: () => void
-  configCounts: { skills: number; mcp: number; agents: number }
 }
 
 function shortPath(p: string): string {
@@ -37,7 +35,7 @@ function timeLabel(ms: number): string {
   return `${d.getMonth() + 1}/${d.getDate()}`
 }
 
-export default function Sidebar({ threads, activeId, wsPath, sideView, onSideView, onSelect, onNew, onDelete, onBrowseWorkspace, onOpenSettings, configCounts }: Props) {
+export default function Sidebar({ threads, activeId, wsPath, sideView, onSideView, onSelect, onNew, onDelete, onBrowseWorkspace, onOpenSettings }: Props) {
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -108,11 +106,6 @@ export default function Sidebar({ threads, activeId, wsPath, sideView, onSideVie
                   </div>
                 </div>
               ))}
-            </div>
-            <div className="side-placeholder" title="在设置中配置">
-              <Badge variant="outline">Skills {configCounts.skills}</Badge>
-              <Badge variant="outline">MCP {configCounts.mcp}</Badge>
-              <Badge variant="outline">Agents {configCounts.agents}</Badge>
             </div>
           </>
         ) : (

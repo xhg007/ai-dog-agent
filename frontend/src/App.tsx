@@ -10,7 +10,7 @@ import ReviewPanel from './components/ReviewPanel'
 import SettingsPanel from './components/SettingsPanel'
 import { PendingApproval } from './components/ApprovalCard'
 import { ChatService } from '../bindings/ai-dog-agent/internal/agent/index.js'
-import { WorkspaceService, ApprovalService, ConfigService } from '../bindings/ai-dog-agent/internal/service/index.js'
+import { WorkspaceService, ApprovalService } from '../bindings/ai-dog-agent/internal/service/index.js'
 
 export interface ThreadInfo {
   id: string
@@ -28,7 +28,6 @@ function App() {
   const [sideView, setSideView] = useState<SideView>('threads')
   const [reviewTick, setReviewTick] = useState(0)
   const [approvalsByThread, setApprovalsByThread] = useState<Record<string, PendingApproval[]>>({})
-  const [configCounts, setConfigCounts] = useState({ skills: 0, mcp: 0, agents: 0 })
 
   const refreshThreads = useCallback(async () => {
     try {
@@ -113,19 +112,6 @@ function App() {
     setThreads(rest)
   }
 
-  // 设置弹层关闭 / 工作区切换后刷新侧边栏配置计数
-  useEffect(() => {
-    if (settingsOpen) return
-    Promise.all([
-      ConfigService.GetConfig(),
-      ConfigService.GetProjectAgents().catch(() => []),
-    ]).then(([c, agents]: [any, any]) => setConfigCounts({
-      skills: (c?.skills ?? []).filter((s: any) => s.enabled).length,
-      mcp: (c?.mcpServers ?? []).filter((m: any) => m.enabled).length,
-      agents: (agents ?? []).length,
-    })).catch(() => { /* 忽略 */ })
-  }, [settingsOpen, wsPath])
-
   const browseWorkspace = async () => {
     try {
       const p = await WorkspaceService.BrowseWorkspace()
@@ -148,7 +134,6 @@ function App() {
         onDelete={deleteThread}
         onBrowseWorkspace={browseWorkspace}
         onOpenSettings={() => setSettingsOpen(true)}
-        configCounts={configCounts}
       />
       <main className="thread-col">
         <ThreadPanel
