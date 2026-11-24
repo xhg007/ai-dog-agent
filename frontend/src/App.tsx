@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Events } from '@wailsio/runtime'
+import { X } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import TitleBar from './components/TitleBar'
 import Sidebar, { SideView } from './components/Sidebar'
 import ThreadPanel from './components/ThreadPanel'
@@ -131,6 +134,7 @@ function App() {
   }
 
   return (
+    <TooltipProvider>
     <div className="app">
       <TitleBar />
       <Sidebar
@@ -169,7 +173,7 @@ function App() {
           <div className="overlay-panel" onClick={e => e.stopPropagation()}>
             <div className="overlay-header">
               <span>设置</span>
-              <button className="btn ghost" onClick={() => setSettingsOpen(false)}>✕ 关闭</button>
+              <Button variant="ghost" size="sm" onClick={() => setSettingsOpen(false)}><X className="size-3.5" /> 关闭</Button>
             </div>
             <div className="overlay-body">
               <SettingsPanel />
@@ -178,6 +182,7 @@ function App() {
         </div>
       )}
     </div>
+    </TooltipProvider>
   )
 }
 

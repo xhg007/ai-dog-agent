@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Events } from '@wailsio/runtime'
+import { RotateCcw } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { TaskService } from '../../bindings/ai-dog-agent/internal/service/index.js'
 import { ChatService } from '../../bindings/ai-dog-agent/internal/agent/index.js'
 
@@ -90,19 +93,20 @@ export default function TaskPanel({ onOpenThread }: Props) {
             const meta = statusMeta[t.status] ?? { label: t.status, cls: 'fail' }
             return (
               <div key={t.id} className="task-item" title={t.error || t.title} onClick={() => onOpenThread(t.sessionId)}>
-                <span className={`task-badge b-${meta.cls}`}>
+                <Badge variant="outline" className={`task-badge b-${meta.cls}`}>
                   {meta.cls === 'running' && <span className="running-dot" />}
                   {meta.label}
-                </span>
+                </Badge>
                 <span className="task-title">{t.title || t.id.slice(0, 8)}</span>
                 <span className="task-time">{timeLabel(t.createdAt)}</span>
                 {(t.status === 'interrupted' || t.status === 'failed') && (
-                  <button
-                    className="task-recover"
+                  <Button
+                    variant="outline"
+                    size="xs"
                     disabled={busy === t.id}
                     onClick={e => { e.stopPropagation(); recover(t) }}
                     title="从最后检查点恢复续跑"
-                  >恢复</button>
+                  ><RotateCcw className="size-3" /> 恢复</Button>
                 )}
               </div>
             )

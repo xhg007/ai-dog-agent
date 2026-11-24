@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Events } from '@wailsio/runtime'
+import { RefreshCw, Undo2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ApprovalService, WorkspaceService } from '../../bindings/ai-dog-agent/internal/service/index.js'
 
 type Tab = 'diff' | 'files'
@@ -14,6 +18,15 @@ function parseStatus(out: string): FileChange[] {
     status: l.slice(0, 2).trim() || '?',
     path: l.slice(3).trim(),
   }))
+}
+
+// git status 单字符分类 → Badge 配色
+const statusVariant: Record<string, { label: string; cls: string }> = {
+  M: { label: 'M', cls: 'mod' },      // 修改
+  A: { label: 'A', cls: 'add' },      // 新增
+  D: { label: 'D', cls: 'del' },      // 删除
+  '?': { label: '?', cls: 'untracked' },
+  U: { label: 'U', cls: 'untracked' },
 }
 
 export default function ReviewPanel({ wsPath, refreshTick }: { wsPath: string; refreshTick: number }) {
@@ -69,14 +82,16 @@ export default function ReviewPanel({ wsPath, refreshTick }: { wsPath: string; r
     <aside className="review">
       <div className="review-header">
         <span className="review-title">审查</span>
-        <button className="side-add" onClick={refresh} title="刷新">⟳</button>
+        <Button variant="ghost" size="icon-sm" onClick={refresh} title="刷新"><RefreshCw /></Button>
       </div>
-      <div className="review-tabs">
-        <button className={`review-tab${tab === 'diff' ? ' active' : ''}`} onClick={() => setTab('diff')}>Diff</button>
-        <button className={`review-tab${tab === 'files' ? ' active' : ''}`} onClick={() => setTab('files')}>
-          文件{changes.length > 0 ? ` (${changes.length})` : ''}
-        </button>
-      </div>
+      <Tabs value={tab} onValueChange={v => setTab(v as Tab)}>
+        <TabsList variant="line" className="w-full justify-start px-2">
+          <TabsTrigger value="diff" className="text-xs">Diff</TabsTrigger>
+          <TabsTrigger value="files" className="text-xs">
+            文件{changes.length > 0 ? ` (${changes.length})` : ''}
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
       <div className="review-body">
         {!wsPath && <div className="review-empty">未设置工作区</div>}
         {wsPath && loading && <div className="review-empty">加载中…</div>}
@@ -89,17 +104,22 @@ export default function ReviewPanel({ wsPath, refreshTick }: { wsPath: string; r
             ? <div className="review-empty">工作区干净</div>
             : (
               <ul className="file-list">
-                {changes.map((c, i) => (
-                  <li key={i} className="file-item">
-                    <span className={`status-badge s-${c.status}`}>{c.status}</span>
-                    <span className="file-path" title={c.path}>{c.path}</span>
-                    <button
-                      className="rollback-btn"
-                      title="回滚到写前备份（仅对本会话中被修改过的文件有效）"
-                      onClick={() => rollback(c.path)}
-                    >↩ 回滚</button>
-                  </li>
-                ))}
+                {changes.map((c, i) => {
+                  const meta = statusVariant[c.status[0]] ?? { label: c.status, cls: 'untracked' }
+                  return (
+                    <li key={i} className="file-item">
+                      <Badge variant="outline" className={`status-${meta.cls} font-mono`}>{meta.label}</Badge>
+                      <span className="file-path" title={c.path}>{c.path}</span>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        className="text-muted-foreground hover:text-destructive"
+                        title="回滚到写前备份（仅对本会话中被修改过的文件有效）"
+                        onClick={() => rollback(c.path)}
+                      ><Undo2 className="size-3" /> 回滚</Button>
+                    </li>
+                  )
+                })}
               </ul>
             )
         )}

@@ -1,4 +1,11 @@
 import { useEffect, useState } from 'react'
+import { Plus, Save } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { Switch } from '@/components/ui/switch'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ConfigService, TaskService } from '../../bindings/ai-dog-agent/internal/service/index.js'
 
 interface ModelConfig {
@@ -199,15 +206,13 @@ function SettingsPanel() {
 
   return (
     <div className="settings">
-      <div className="settings-tabs">
-        {tabs.map(t => (
-          <button
-            key={t.id}
-            className={`settings-tab${tab === t.id ? ' active' : ''}`}
-            onClick={() => { setTab(t.id); setSaved(false); setError('') }}
-          >{t.label}</button>
-        ))}
-      </div>
+      <Tabs value={tab} onValueChange={v => { setTab(v as Tab); setSaved(false); setError('') }}>
+        <TabsList variant="line" className="w-full justify-start">
+          {tabs.map(t => (
+            <TabsTrigger key={t.id} value={t.id} className="text-xs">{t.label}</TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
 
       <div className="card">
         {tab === 'models' && (
@@ -222,43 +227,43 @@ function SettingsPanel() {
               >
                 <div style={{ flex: 1 }}>
                   <div className="form-grid">
-                    <label>显示名</label>
-                    <input className="input" value={m.name} onClick={e => e.stopPropagation()}
+                    <Label>显示名</Label>
+                    <Input value={m.name} onClick={e => e.stopPropagation()}
                       onChange={e => updateModel(i, { name: e.target.value })} />
-                    <label>Base URL</label>
-                    <input className="input" value={m.baseURL} placeholder="https://api.deepseek.com/v1"
+                    <Label>Base URL</Label>
+                    <Input value={m.baseURL} placeholder="https://api.deepseek.com/v1"
                       onClick={e => e.stopPropagation()}
                       onChange={e => updateModel(i, { baseURL: e.target.value })} />
-                    <label>Model ID</label>
-                    <input className="input" value={m.model} placeholder="deepseek-chat"
+                    <Label>Model ID</Label>
+                    <Input value={m.model} placeholder="deepseek-chat"
                       onClick={e => e.stopPropagation()}
                       onChange={e => updateModel(i, { model: e.target.value })} />
-                    <label>API Key</label>
-                    <input className="input" type="password" value={m.apiKey}
+                    <Label>API Key</Label>
+                    <Input type="password" value={m.apiKey}
                       onClick={e => e.stopPropagation()}
                       onChange={e => updateModel(i, { apiKey: e.target.value })} />
-                    <label>输入单价/1M</label>
-                    <input className="input" type="number" value={m.priceIn}
+                    <Label>输入单价/1M</Label>
+                    <Input type="number" value={m.priceIn}
                       onClick={e => e.stopPropagation()}
                       onChange={e => updateModel(i, { priceIn: Number(e.target.value) })} />
-                    <label>输出单价/1M</label>
-                    <input className="input" type="number" value={m.priceOut}
+                    <Label>输出单价/1M</Label>
+                    <Input type="number" value={m.priceOut}
                       onClick={e => e.stopPropagation()}
                       onChange={e => updateModel(i, { priceOut: Number(e.target.value) })} />
                   </div>
                   <div className="row-actions">
-                    <button className="btn danger" onClick={e => {
+                    <Button variant="destructive" size="sm" onClick={e => {
                       e.stopPropagation()
                       patch({ models: cfg.models.filter(x => x.id !== m.id) })
-                    }}>删除</button>
+                    }}>删除</Button>
                   </div>
                 </div>
                 <div className="meta">{cfg.activeModelId === m.id ? '当前使用' : '点击设为当前'}</div>
               </div>
             ))}
             <div className="row-actions">
-              <button className="btn secondary" onClick={addModel}>添加模型</button>
-              <button className="btn" onClick={saveConfig}>{saved ? '已保存' : '保存配置'}</button>
+              <Button variant="secondary" size="sm" onClick={addModel}><Plus className="size-3.5" /> 添加模型</Button>
+              <Button size="sm" onClick={saveConfig}>{saved ? '已保存' : <><Save className="size-3.5" /> 保存配置</>}</Button>
             </div>
             <p className="hint">
               配置文件：{dir || '…'}<br />
@@ -276,34 +281,33 @@ function SettingsPanel() {
               <div key={s.id} className="model-row">
                 <div style={{ flex: 1 }}>
                   <div className="form-grid">
-                    <label>名称</label>
-                    <input className="input" value={s.name} onChange={e => updateSkill(i, { name: e.target.value })} />
-                    <label>说明</label>
-                    <input className="input" value={s.description} placeholder="例如：Go 代码审查清单"
+                    <Label>名称</Label>
+                    <Input value={s.name} onChange={e => updateSkill(i, { name: e.target.value })} />
+                    <Label>说明</Label>
+                    <Input value={s.description} placeholder="例如：Go 代码审查清单"
                       onChange={e => updateSkill(i, { description: e.target.value })} />
-                    <label>指令内容</label>
-                    <textarea className="input textarea" rows={3} value={s.prompt}
+                    <Label>指令内容</Label>
+                    <Textarea rows={3} value={s.prompt}
                       placeholder="追加给 Agent 的具体指令"
                       onChange={e => updateSkill(i, { prompt: e.target.value })} />
-                    <label>启用</label>
-                    <input type="checkbox" className="checkbox" checked={s.enabled}
-                      onChange={e => updateSkill(i, { enabled: e.target.checked })} />
+                    <Label>启用</Label>
+                    <Switch checked={s.enabled} onCheckedChange={v => updateSkill(i, { enabled: v })} />
                   </div>
                   <div className="row-actions">
-                    <button className="btn danger" onClick={() =>
-                      patch({ skills: cfg.skills.filter(x => x.id !== s.id) })}>删除</button>
+                    <Button variant="destructive" size="sm" onClick={() =>
+                      patch({ skills: cfg.skills.filter(x => x.id !== s.id) })}>删除</Button>
                   </div>
                 </div>
                 <div className="meta">{s.enabled ? '已启用' : '未启用'}</div>
               </div>
             ))}
             <div className="row-actions">
-              <button className="btn secondary" onClick={() => patch({
+              <Button variant="secondary" size="sm" onClick={() => patch({
                 skills: [...cfg.skills, {
                   id: crypto.randomUUID(), name: '新 Skill', description: '', prompt: '', enabled: true,
                 }],
-              })}>添加 Skill</button>
-              <button className="btn" onClick={saveConfig}>{saved ? '已保存' : '保存配置'}</button>
+              })}><Plus className="size-3.5" /> 添加 Skill</Button>
+              <Button size="sm" onClick={saveConfig}>{saved ? '已保存' : <><Save className="size-3.5" /> 保存配置</>}</Button>
             </div>
           </>
         )}
@@ -319,37 +323,36 @@ function SettingsPanel() {
               <div key={m.id} className="model-row">
                 <div style={{ flex: 1 }}>
                   <div className="form-grid">
-                    <label>名称</label>
-                    <input className="input" value={m.name} onChange={e => updateMCP(i, { name: e.target.value })} />
-                    <label>启动命令</label>
-                    <input className="input" value={m.command} placeholder="npx / uvx / 可执行文件路径"
+                    <Label>名称</Label>
+                    <Input value={m.name} onChange={e => updateMCP(i, { name: e.target.value })} />
+                    <Label>启动命令</Label>
+                    <Input value={m.command} placeholder="npx / uvx / 可执行文件路径"
                       onChange={e => updateMCP(i, { command: e.target.value })} />
-                    <label>参数</label>
-                    <input className="input" value={m.args} placeholder="-y, @modelcontextprotocol/server-filesystem"
+                    <Label>参数</Label>
+                    <Input value={m.args} placeholder="-y, @modelcontextprotocol/server-filesystem"
                       onChange={e => updateMCP(i, { args: e.target.value })} />
-                    <label>环境变量</label>
-                    <textarea className="input textarea" rows={2} value={m.env}
+                    <Label>环境变量</Label>
+                    <Textarea rows={2} value={m.env}
                       placeholder={'ROOT=C:\\project\nDEBUG=0'}
                       onChange={e => updateMCP(i, { env: e.target.value })} />
-                    <label>启用</label>
-                    <input type="checkbox" className="checkbox" checked={m.enabled}
-                      onChange={e => updateMCP(i, { enabled: e.target.checked })} />
+                    <Label>启用</Label>
+                    <Switch checked={m.enabled} onCheckedChange={v => updateMCP(i, { enabled: v })} />
                   </div>
                   <div className="row-actions">
-                    <button className="btn danger" onClick={() =>
-                      patch({ mcpServers: cfg.mcpServers.filter(x => x.id !== m.id) })}>删除</button>
+                    <Button variant="destructive" size="sm" onClick={() =>
+                      patch({ mcpServers: cfg.mcpServers.filter(x => x.id !== m.id) })}>删除</Button>
                   </div>
                 </div>
                 <div className="meta">{m.enabled ? '已启用' : '未启用'}</div>
               </div>
             ))}
             <div className="row-actions">
-              <button className="btn secondary" onClick={() => patch({
+              <Button variant="secondary" size="sm" onClick={() => patch({
                 mcpServers: [...cfg.mcpServers, {
                   id: crypto.randomUUID(), name: '新 MCP Server', command: '', args: '', env: '', enabled: true,
                 }],
-              })}>添加 MCP Server</button>
-              <button className="btn" onClick={saveConfig}>{saved ? '已保存' : '保存配置'}</button>
+              })}><Plus className="size-3.5" /> 添加 MCP Server</Button>
+              <Button size="sm" onClick={saveConfig}>{saved ? '已保存' : <><Save className="size-3.5" /> 保存配置</>}</Button>
             </div>
           </>
         )}
@@ -367,34 +370,34 @@ function SettingsPanel() {
               <div key={i} className="model-row">
                 <div style={{ flex: 1 }}>
                   <div className="form-grid">
-                    <label>名称</label>
-                    <input className="input" value={a.name} placeholder="reviewer"
+                    <Label>名称</Label>
+                    <Input value={a.name} placeholder="reviewer"
                       onChange={e => updateAgent(i, { name: e.target.value })} />
-                    <label>说明</label>
-                    <input className="input" value={a.description} placeholder="代码审查子 Agent"
+                    <Label>说明</Label>
+                    <Input value={a.description} placeholder="代码审查子 Agent"
                       onChange={e => updateAgent(i, { description: e.target.value })} />
-                    <label>系统提示词</label>
-                    <textarea className="input textarea" rows={4} value={a.system_prompt}
+                    <Label>系统提示词</Label>
+                    <Textarea rows={4} value={a.system_prompt}
                       placeholder="你是代码审查专家，只读不改。"
                       onChange={e => updateAgent(i, { system_prompt: e.target.value })} />
-                    <label>模型覆盖</label>
-                    <input className="input" value={a.model} placeholder="留空则跟随当前模型"
+                    <Label>模型覆盖</Label>
+                    <Input value={a.model} placeholder="留空则跟随当前模型"
                       onChange={e => updateAgent(i, { model: e.target.value })} />
-                    <label>工具集</label>
-                    <input className="input" value={a.tools} placeholder="read_file, search_code"
+                    <Label>工具集</Label>
+                    <Input value={a.tools} placeholder="read_file, search_code"
                       onChange={e => updateAgent(i, { tools: e.target.value })} />
-                    <label>Skills</label>
-                    <input className="input" value={a.skills} placeholder="go-review"
+                    <Label>Skills</Label>
+                    <Input value={a.skills} placeholder="go-review"
                       onChange={e => updateAgent(i, { skills: e.target.value })} />
-                    <label>MCP Servers</label>
-                    <input className="input" value={a.mcp_servers} placeholder="local-fs"
+                    <Label>MCP Servers</Label>
+                    <Input value={a.mcp_servers} placeholder="local-fs"
                       onChange={e => updateAgent(i, { mcp_servers: e.target.value })} />
-                    <label>最大轮数</label>
-                    <input className="input" type="number" value={a.max_turns}
+                    <Label>最大轮数</Label>
+                    <Input type="number" value={a.max_turns}
                       onChange={e => updateAgent(i, { max_turns: Number(e.target.value) })} />
                   </div>
                   <div className="row-actions">
-                    <button className="btn danger" onClick={() => removeAgent(i)}>删除</button>
+                    <Button variant="destructive" size="sm" onClick={() => removeAgent(i)}>删除</Button>
                   </div>
                 </div>
                 <div className="meta">
@@ -404,11 +407,11 @@ function SettingsPanel() {
               </div>
             ))}
             <div className="row-actions">
-              <button className="btn secondary" disabled={!agentDir} onClick={() => setAgents(a => [...a, {
+              <Button variant="secondary" size="sm" disabled={!agentDir} onClick={() => setAgents(a => [...a, {
                 agent_id: '', name: '', description: '', system_prompt: '', model: '',
                 tools: '', skills: '', mcp_servers: '', max_turns: 0,
-              }])}>添加 Agent</button>
-              <button className="btn" disabled={!agentDir} onClick={saveAgents}>{saved ? '已保存' : '保存 Agent 配置'}</button>
+              }])}><Plus className="size-3.5" /> 添加 Agent</Button>
+              <Button size="sm" disabled={!agentDir} onClick={saveAgents}>{saved ? '已保存' : <><Save className="size-3.5" /> 保存 Agent 配置</>}</Button>
             </div>
           </>
         )}
@@ -426,23 +429,22 @@ function SettingsPanel() {
               {cfg.shellWhitelist.map((w, i) => (
                 <div key={w} className="whitelist-row">
                   <code className="whitelist-name">{w}</code>
-                  <button className="btn danger" onClick={() =>
+                  <Button variant="destructive" size="sm" onClick={() =>
                     patch({ shellWhitelist: cfg.shellWhitelist.filter((_, j) => j !== i) })
-                  }>删除</button>
+                  }>删除</Button>
                 </div>
               ))}
             </div>
             <div className="row-actions">
-              <input
-                className="input"
-                style={{ maxWidth: 220 }}
+              <Input
+                className="w-56"
                 placeholder="程序名，如 node"
                 value={newWhitelistEntry}
                 onChange={e => setNewWhitelistEntry(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') addWhitelistEntry() }}
               />
-              <button className="btn secondary" onClick={addWhitelistEntry}>添加</button>
-              <button className="btn" onClick={saveConfig}>{saved ? '已保存' : '保存配置'}</button>
+              <Button variant="secondary" size="sm" onClick={addWhitelistEntry}>添加</Button>
+              <Button size="sm" onClick={saveConfig}>{saved ? '已保存' : <><Save className="size-3.5" /> 保存配置</>}</Button>
             </div>
           </>
         )}
@@ -451,7 +453,7 @@ function SettingsPanel() {
           <UsageTab />
         )}
 
-        {error && <p className="hint" style={{ color: 'var(--red)' }}>保存失败：{error}</p>}
+        {error && <p className="hint text-destructive">保存失败：{error}</p>}
       </div>
     </div>
   )
@@ -480,7 +482,7 @@ function UsageTab() {
         每次 LLM 调用的输入/输出 tokens 与成本（元/1M tokens 单价折算）按日汇总。
         成本随模型设置中的单价实时折算，历史记录不改写。
       </p>
-      {err && <p className="hint" style={{ color: 'var(--red)' }}>{err}</p>}
+      {err && <p className="hint text-destructive">{err}</p>}
       {rows.length === 0 ? (
         <p className="hint">暂无用量记录</p>
       ) : (

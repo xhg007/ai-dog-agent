@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { Events } from '@wailsio/runtime'
+import { Bot, SendHorizontal, Square } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Textarea } from '@/components/ui/textarea'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ChatService } from '../../bindings/ai-dog-agent/internal/agent/index.js'
 import { ConfigService } from '../../bindings/ai-dog-agent/internal/service/index.js'
 import ApprovalCard, { PendingApproval } from './ApprovalCard'
@@ -187,7 +192,7 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, onThreadsCh
     <div className="thread">
       <div className="thread-header">
         <span className="thread-header-title">{activeTitle || threadTitle}</span>
-        {agentId && <span className="chip">Agent {agentId.slice(0, 8)}</span>}
+        {agentId && <Badge variant="outline" className="font-mono text-[10px]">Agent {agentId.slice(0, 8)}</Badge>}
         <span className="spacer" />
         <span className="usage-inline">
           {usage ? `Tokens ${usage.totalTokens}（入 ${usage.promptTokens} / 出 ${usage.completionTokens}）` : ''}
@@ -197,10 +202,11 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, onThreadsCh
       <div className="chat-messages" ref={scrollRef}>
         {isEmpty && (
           <div className="chat-empty">
+            <div className="chat-empty-icon"><Bot className="size-8" /></div>
             <h2>ai-dog-agent</h2>
             <p>多 Agent 编码开发助手 · 主 Agent 已就绪</p>
             {wsPath
-              ? <p>工作区已就绪。试试：「理解一下这个项目」— 主 Agent 会分派 explorer 子 Agent 分析结构、依赖、入口与符号。</p>
+              ? <p>工作区已就绪。试试：<span className="text-primary">「理解一下这个项目」</span> — 主 Agent 会分派 explorer 子 Agent 分析结构、依赖、入口与符号。</p>
               : <p>在左侧「项目」中选择目录后，即可进行项目理解与代码探索。</p>}
           </div>
         )}
@@ -244,7 +250,7 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, onThreadsCh
 
       <div className="composer">
         <div className="composer-box">
-          <textarea
+          <Textarea
             className="chat-input"
             rows={2}
             value={input}
@@ -258,21 +264,23 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, onThreadsCh
             }}
           />
           <div className="composer-toolbar">
-            <select
-              className="model-select"
-              value={activeModelId}
-              onChange={e => switchModel(e.target.value)}
-              title="切换模型（新线程生效）"
-            >
-              {models.map((m: any) => (
-                <option key={m.id} value={m.id}>{m.name} · {m.model}</option>
-              ))}
-            </select>
+            {models.length > 0 && (
+              <Select value={activeModelId} onValueChange={switchModel}>
+                <SelectTrigger size="sm" className="max-w-56 text-xs" title="切换模型（新线程生效）">
+                  <SelectValue placeholder="选择模型" />
+                </SelectTrigger>
+                <SelectContent>
+                  {models.map((m: any) => (
+                    <SelectItem key={m.id} value={m.id}>{m.name} · {m.model}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             <span className="composer-mode">Local</span>
             <span className="spacer" />
             {running
-              ? <button className="btn danger" onClick={cancel}>■ 中断</button>
-              : <button className="btn" onClick={send} disabled={!input.trim()}>发送 ↑</button>}
+              ? <Button variant="destructive" size="sm" onClick={cancel}><Square className="size-3" /> 中断</Button>
+              : <Button size="sm" onClick={send} disabled={!input.trim()}>发送 <SendHorizontal className="size-3.5" /></Button>}
           </div>
         </div>
       </div>

@@ -2,17 +2,18 @@
 
 ## Table of Contents
 1. [Installation & Setup](#installation--setup)
-2. [Events](#events)
-3. [Window](#window)
-4. [Dialogs](#dialogs)
-5. [Clipboard](#clipboard)
-6. [Screens](#screens)
-7. [Application](#application)
-8. [Browser](#browser)
-9. [System](#system)
-10. [WML (Wails Markup Language)](#wml-wails-markup-language)
-11. [TypeScript Support](#typescript-support)
-12. [Best Practices](#best-practices)
+2. [Call (Invoke Go)](#call-invoke-go)
+3. [Events](#events)
+4. [Window](#window)
+5. [Dialogs](#dialogs)
+6. [Clipboard](#clipboard)
+7. [Screens](#screens)
+8. [Application](#application)
+9. [Browser](#browser)
+10. [System (Raw Messages)](#system-raw-messages)
+11. [WML (Wails Markup Language)](#wml-wails-markup-language)
+12. [TypeScript Support & Typed Events](#typescript-support--typed-events)
+13. [Best Practices](#best-practices)
 
 ---
 
@@ -24,7 +25,7 @@ npm install --save @wailsio/runtime
 
 **Import API modules:**
 ```javascript
-import { Events, Window, Dialogs, Clipboard, Screens, Application, Browser } from '@wailsio/runtime'
+import { Call, Events, Window, Dialogs, Clipboard, Screens, Application, Browser, System } from '@wailsio/runtime'
 ```
 
 **Required side-effect import** (enables context menus + window dragging):
@@ -43,6 +44,24 @@ wails3 generate runtime   # outputs runtime.js and runtime.debug.js
 </script>
 ```
 > ⚠️ Use `type="module"` and wait for `onload` — ES modules run asynchronously.
+
+---
+
+## Call (Invoke Go)
+
+```javascript
+import { Call } from '@wailsio/runtime'
+
+// By generated ID (fastest — what generated bindings use)
+const result = await Call.ByID("main.GreetService.Greet", "World")
+
+// By full method name
+const result2 = await Call.ByName("main.GreetService.Greet", "World")
+```
+
+- Arguments are variadic — pass Go method params in order
+- Returns `Promise` resolving to the Go return value
+- Go errors throw: check `err instanceof Call.RuntimeError` for business errors (`.cause` holds structured error JSON)
 
 ---
 
@@ -68,49 +87,21 @@ const unsub = Events.On('data-updated', (event) => {
 unsub()
 ```
 
-**With typed events (TypeScript):**
-```typescript
-import { UserLogin } from './bindings/events'
-
-Events.On(UserLogin, (event) => {
-    console.log(event.data.username)  // fully typed
-})
-```
-
----
-
 ### `Events.Once(eventName, callback)` → unsubscribe function
 
 Fires callback exactly once, then auto-unsubscribes.
 
 ```javascript
-Events.Once('app-ready', () => {
-    console.log('App initialized')
-})
+Events.Once('app-ready', () => { console.log('App initialized') })
 ```
-
----
 
 ### `Events.Emit(name, data?)` → `Promise<boolean>`
 
-Emits an event. Returns `true` if cancelled by a hook, `false` otherwise.
+Emits an event. Returns `true` if cancelled by a Go-side hook, `false` otherwise.
 
 ```javascript
 await Events.Emit('button-clicked', { id: 'submit' })
 ```
-
-**Typed emit (TypeScript):**
-```typescript
-import { UserLogin } from './bindings/events'
-
-const cancelled = await Events.Emit(UserLogin({
-    UserID: "123",
-    Username: "john_doe",
-    LoginTime: new Date().toISOString()
-}))
-```
-
----
 
 ### `Events.Off(...eventNames)` / `Events.OffAll()`
 
@@ -119,25 +110,10 @@ Events.Off('user-logged-in', 'user-logged-out')
 Events.OffAll()
 ```
 
----
+### `Events.NewEventType<T>(name)` — create a typed event locally
 
-### Typed Events (Go side)
-
-Register typed events in Go so bindings generator can emit `.d.ts` types:
-```go
-type UserData struct {
-    ID   string
-    Name string
-}
-
-func init() {
-    application.RegisterEvent[UserData]("user-updated")
-}
-```
-
-Then run:
-```bash
-wails3 generate bindings -ts
+```typescript
+export const UserLogin = Events.NewEventType<UserData>('UserLogin')
 ```
 
 ---
@@ -164,6 +140,7 @@ await other.Show()
 | `Show()` | `(): Promise<void>` | Show window |
 | `Hide()` | `(): Promise<void>` | Hide window |
 | `Close()` | `(): Promise<void>` | Close window |
+| `Destroy()` | `(): Promise<void>` | Destroy window |
 
 ### Size & Position
 
@@ -187,7 +164,11 @@ const { width, height } = await Window.Size()
 |---|---|
 | `Minimise()` | `(): Promise<void>` |
 | `Maximise()` | `(): Promise<void>` |
+| `ToggleMaximise()` | `(): Promise<void>` |
+| `UnMaximise()` | `(): Promise<void>` |
 | `Fullscreen()` | `(): Promise<void>` |
+| `ToggleFullscreen()` | `(): Promise<void>` |
+| `UnFullscreen()` | `(): Promise<void>` |
 | `Restore()` | `(): Promise<void>` |
 | `IsMinimised()` | `(): Promise<boolean>` |
 | `IsMaximised()` | `(): Promise<boolean>` |
@@ -202,6 +183,8 @@ const { width, height } = await Window.Size()
 | `SetBackgroundColour(r,g,b,a)` | `(r,g,b,a: number): Promise<void>` |
 | `SetAlwaysOnTop(b)` | `(b: boolean): Promise<void>` |
 | `SetResizable(b)` | `(b: boolean): Promise<void>` |
+| `SetMinSize(w,h)` / `SetMaxSize(w,h)` | `(w: number, h: number): Promise<void>` |
+| `SetEnabled(b)` | `(b: boolean): Promise<void>` |
 
 ### Focus & Screen
 
@@ -224,9 +207,7 @@ const { width, height } = await Window.Size()
 |---|---|
 | `SetZoom(level)` | `(level: number): Promise<void>` |
 | `GetZoom()` | `(): Promise<number>` |
-| `ZoomIn()` | `(): Promise<void>` |
-| `ZoomOut()` | `(): Promise<void>` |
-| `ZoomReset()` | `(): Promise<void>` Reset to 100% |
+| `ZoomIn()` / `ZoomOut()` / `ZoomReset()` | `(): Promise<void>` |
 
 ### Print
 
@@ -369,10 +350,10 @@ await Browser.OpenURL(new URL('https://wails.io'))
 
 ---
 
-## System
+## System (Raw Messages)
 
 Low-level raw message to the Go backend (`RawMessageHandler`).
-Bypass the standard binding system — use only if bindings are a confirmed bottleneck.
+Bypasses the standard binding system — use only if bindings are a confirmed bottleneck.
 
 ```javascript
 import { System } from '@wailsio/runtime'
@@ -408,23 +389,7 @@ Declarative HTML attributes — no JavaScript required.
 
 ---
 
-## Vite Plugin for Typed Events (HMR)
-
-```typescript
-// vite.config.ts
-import { defineConfig } from 'vite'
-import wails from '@wailsio/runtime/plugins/vite'
-
-export default defineConfig({
-    plugins: [wails()],
-})
-```
-
-Benefits: event bindings auto-reload on `wails3 generate bindings`.
-
----
-
-## TypeScript Support
+## TypeScript Support & Typed Events
 
 The runtime ships with full TypeScript definitions.
 
@@ -440,6 +405,31 @@ Events.On('custom-event', (event) => {
 const size: { width: number, height: number } = await Window.Size()
 ```
 
+**Typed events from Go (`//wails:event` directive):**
+
+```typescript
+import { UserLogin } from './bindings/myapp/events'
+
+Events.On(UserLogin, (event) => {
+    console.log(event.data.username)  // fully typed
+})
+
+const cancelled = await Events.Emit(UserLogin({ UserID: "123", Username: "john_doe" }))
+```
+
+**Vite plugin for typed events (HMR):**
+```typescript
+// vite.config.ts
+import { defineConfig } from 'vite'
+import wails from '@wailsio/runtime/plugins/vite'
+
+export default defineConfig({
+    plugins: [wails()],
+})
+```
+
+Benefits: event bindings auto-reload on `wails3 generate bindings`.
+
 ---
 
 ## Best Practices
@@ -450,6 +440,7 @@ const size: { width: number, height: number } = await Window.Size()
 - Use WML for simple click actions (cleaner than inline JS)
 - Unsubscribe events when components unmount (`const unsub = Events.On(...)`)
 - Handle dialog return values
+- Use `Call.RuntimeError` to distinguish business errors from bridge errors
 
 ### ❌ Don't
 - Don't forget `await` — silent no-ops without it

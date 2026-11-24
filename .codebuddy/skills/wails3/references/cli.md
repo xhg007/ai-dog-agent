@@ -1,14 +1,54 @@
-# Wails v3 CLI Reference
+# Wails v3 CLI & Build System Reference
 
 All commands: `wails3 <command>`
 
 ## Table of Contents
-1. [Core Commands](#core-commands) — `init`, `dev`, `build`, `package`, `task`, `doctor`
-2. [Generate Commands](#generate-commands) — `generate bindings`, `generate icons`, etc.
-3. [Service Commands](#service-commands) — `service init`
-4. [Update Commands](#update-commands) — `update cli`, `update build-assets`
-5. [Tool Commands](#tool-commands) — `tool version`, `tool package`, etc.
-6. [Utility Commands](#utility-commands) — `docs`, `version`, `sponsor`
+1. [Build System](#build-system) — architecture, config.yml, Taskfile namespaces
+2. [Core Commands](#core-commands) — `init`, `dev`, `build`, `package`, `task`, `doctor`
+3. [Generate Commands](#generate-commands) — `generate bindings`, `generate icons`, etc.
+4. [Service Commands](#service-commands) — `service init`
+5. [Update Commands](#update-commands) — `update cli`, `update build-assets`
+6. [Tool Commands](#tool-commands) — `tool version`, `tool package`, etc.
+7. [Utility Commands](#utility-commands) — `docs`, `version`, `sponsor`
+
+---
+
+## Build System
+
+Wails v3 wraps the [Task](https://taskfile.dev) task runner. `wails3 build`/`dev`/`package` are thin wrappers over Taskfile tasks.
+
+### Architecture
+
+```
+project/
+├── Taskfile.yml              # top-level: common tasks, includes platform namespaces
+├── build/
+│   ├── config.yml            # project metadata — name, identifier, product info, versions
+│   ├── Taskfile.darwin.yml   # macOS tasks (namespace darwin:)
+│   ├── Taskfile.windows.yml  # Windows tasks (namespace windows:)
+│   └── Taskfile.linux.yml    # Linux tasks (namespace linux:)
+└── frontend/                 # your web app (any framework or none)
+```
+
+- `build/config.yml` holds project metadata (replaces v2's build.json)
+- Platform namespaces: `darwin:build`, `windows:build`, `linux:build`, `linux:create:appimage`, etc.
+- Run any task directly: `wails3 task <namespace>:<task> KEY=VALUE`
+
+### Dev vs Build
+
+| | `wails3 dev` | `wails3 build` |
+|---|---|---|
+| Frontend assets | Vite dev server (live reload) | Embedded into binary (go:embed) |
+| Debug build | Yes | Yes (stripped) |
+| Port conflict | Debug info served via localhost | N/A |
+| Prod-ready | No | Yes |
+
+### Build flags & customization
+
+- `wails3 build PLATFORM=linux CONFIG=production` — forward variables to Taskfile tasks
+- Custom build tags: only `--tags` is forwarded to the Go compiler
+- All other ldflags/compiler config: edit the tasks in `build/Taskfile.<platform>.yml`
+- `Taskfile.yml` defines default tasks the CLI calls — customize freely
 
 ---
 
@@ -154,10 +194,12 @@ wails3 generate bindings [flags] [patterns...]
 | `-ts` | Generate TypeScript | `false` |
 | `-d` | Output directory | `frontend/bindings` |
 | `-i` | Use TS interfaces (not classes) | `false` |
+| `-time-type` | `time.Time` conversion target (`Date` or default string) | `string` |
 | `-models` | Models filename | `models` |
 | `-index` | Index filename | `index` |
 | `-b` | Use bundled runtime | `false` |
 | `-names` | Use method names (not IDs) | `false` |
+| `-tags` | Extra Go build tags | |
 | `-noindex` | Skip index files | `false` |
 | `-clean` | Clean output dir first | `false` |
 | `-dry` | Dry run | `false` |

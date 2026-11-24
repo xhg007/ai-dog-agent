@@ -3,15 +3,13 @@
 ## Table of Contents
 1. [Creating an Application](#creating-an-application)
 2. [Core Methods](#core-methods)
-3. [Window Management](#window-management)
-4. [Event Management](#event-management)
-5. [Service Management](#service-management)
-6. [Dialogs](#dialogs)
-7. [Other Managers](#other-managers)
-8. [Logger](#logger)
-9. [Raw Message Handling](#raw-message-handling)
-10. [Platform-Specific Options](#platform-specific-options)
-11. [Complete Example](#complete-example)
+3. [Event System](#event-system)
+4. [Menus](#menus)
+5. [System Tray](#system-tray)
+6. [Other Managers](#other-managers)
+7. [Platform-Specific Options](#platform-specific-options)
+
+Window management details → `references/windows.md`; dialogs → `references/dialogs.md`.
 
 ---
 
@@ -65,92 +63,17 @@ config := app.Config()
 fmt.Println("App name:", config.Name)
 ```
 
----
-
-## Window Management
-
-### `app.Window.New() *WebviewWindow`
-
-Create a new webview window with defaults.
+### Lifecycle callbacks
 
 ```go
-window := app.Window.New()
-window.Show()
-```
-
-### `app.Window.NewWithOptions(opts) *WebviewWindow`
-
-Create a window with custom options.
-
-```go
-window := app.Window.NewWithOptions(application.WebviewWindowOptions{
-    Title:            "Main Window",
-    Width:            1024,
-    Height:           768,
-    MinWidth:         800,
-    MinHeight:        600,
-    BackgroundColour: application.NewRGB(255, 255, 255),
-    URL:              "http://wails.localhost/",
-    // HTML:          "<html>...</html>",  // inline HTML
+app.OnShutdown(func() {
+    fmt.Println("App shutting down — doing cleanup")
 })
-window.Centre()
-window.Show()
-```
-
-**Key WebviewWindowOptions fields:**
-
-| Field | Type | Description |
-|---|---|---|
-| `Name` | `string` | Unique identifier for `GetByName` |
-| `Title` | `string` | Window title bar text |
-| `Width`, `Height` | `int` | Initial dimensions |
-| `MinWidth`, `MinHeight` | `int` | Minimum resize limits |
-| `MaxWidth`, `MaxHeight` | `int` | Maximum resize limits |
-| `URL` | `string` | URL to load (default: `http://wails.localhost/`) |
-| `HTML` | `string` | Inline HTML to load |
-| `BackgroundColour` | `RGBA` | Window background color |
-| `Frameless` | `bool` | Remove native window frame |
-| `AlwaysOnTop` | `bool` | Keep window above others |
-| `Hidden` | `bool` | Start hidden |
-| `Resizable` | `bool` | Allow resize |
-| `StartState` | `WindowState` | `Normal`, `Minimised`, `Maximised`, `Fullscreen` |
-
-### `app.Window.GetByName(name) Window`
-
-```go
-win := app.Window.GetByName("settings")
-if win != nil { win.Show() }
-```
-
-### `app.Window.GetAll() []Window`
-
-```go
-for _, w := range app.Window.GetAll() {
-    fmt.Println(w.Name())
-}
-```
-
-### Window Methods
-
-```go
-window.Show()
-window.Hide()
-window.Close()
-window.Centre()
-window.SetTitle("New Title")
-window.SetSize(1280, 720)
-window.Minimise()
-window.Maximise()
-window.Fullscreen()
-window.Restore()
-window.SetAlwaysOnTop(true)
-window.Focus()
-window.EmitEvent("my-event", data)  // emit event to this window's JS
 ```
 
 ---
 
-## Event Management
+## Event System
 
 Events enable pub/sub communication between Go services, windows, and the frontend.
 
@@ -176,96 +99,85 @@ app.Event.On("user-logged-in", func(e *application.CustomEvent) {
 })
 ```
 
-### `app.Event.OnApplicationEvent(eventType, callback) func()`
+### System/common events
 
-Listen for application lifecycle events. Returns unsubscribe function.
+Application and window events live under `application events.Common.*` constants:
 
 ```go
-// Available events: EventApplicationShutdown, EventApplicationStartup,
-//   EventWindowFocus, EventWindowBlur, EventWindowClose, etc.
-app.Event.OnApplicationEvent(application.EventApplicationShutdown, func(e *application.ApplicationEvent) {
-    fmt.Println("App shutting down — doing cleanup")
+import "github.com/wailsapp/wails/v3/pkg/events"
+
+// Common application events:
+events.Common.ApplicationStarted
+events.Common.ApplicationShutdown
+// Common window events:
+events.Common.WindowFocus
+events.Common.WindowBlur
+events.Common.WindowClosing
+events.Common.WindowDidResize
+```
+
+### Hooks vs Listeners (critical)
+
+- **Listeners** (`window.OnWindowEvent(event, fn)`) are passive — they cannot cancel or block an event.
+- **Hooks** (`window.RegisterHook(event, fn)`) run before listeners and can call `e.Cancel()` to prevent the default behavior. This is the **only** way to intercept e.g. `WindowClosing`.
+
+```go
+window.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
+    e.Cancel()   // prevent the window from closing
 })
 ```
 
----
-
-## Service Management
-
-### Register at startup (recommended)
-
-```go
-app := application.New(application.Options{
-    Services: []application.Service{
-        application.NewService(&GreetService{}),
-    },
-})
-```
-
-### `app.RegisterService(service) error`
-
-Register after app creation (e.g., when service needs the app reference).
-
-```go
-app := application.New(application.Options{})
-app.RegisterService(application.NewService(NewNotificationService(app)))
-```
+`OnWindowEvent` / `RegisterHook` return an unsubscribe function.
 
 ---
 
-## Dialogs
+## Menus
 
-### Message Dialogs (chained builder API)
+### Application Menu
 
 ```go
-// Info
-app.Dialog.Info().SetTitle("Done").SetMessage("Saved!").Show()
+menu := app.NewMenu()
+menu.AddRole(application.AppMenu)                     // macOS standard app menu (macOS only)
 
-// Error
-app.Dialog.Error().SetTitle("Error").SetMessage("Something failed.").Show()
+fileMenu := menu.AddMenu("File")
+fileMenu.Add("New File").
+    SetAccelerator("CmdOrCtrl+N").
+    OnClick(func(ctx *application.Context) { newFile() })
+fileMenu.Add("Open...").SetAccelerator("CmdOrCtrl+O")
+fileMenu.AddSeparator()
 
-// Warning
-app.Dialog.Warning().SetTitle("Caution").SetMessage("Cannot undo this.").Show()
+editMenu := menu.AddMenu("Edit")
+editMenu.AddRole(application.EditMenu)                // standard edit roles (Mac)
+
+app.SetMenu(menu)
 ```
 
-### Question Dialog
+### Context Menu
 
 ```go
-dlg := app.Dialog.Question().
-    SetTitle("Confirm").
-    SetMessage("Delete this item?")
+ctxMenu := app.NewMenu()
+ctxMenu.Add("Copy").OnClick(func(ctx *application.Context) { doCopy() })
+ctxMenu.Add("Paste")
 
-yes := dlg.AddButton("Yes")
-yes.OnClick(func() { deleteItem() })
-
-no := dlg.AddButton("No")
-dlg.SetDefaultButton(yes)
-dlg.SetCancelButton(no)
-dlg.Show()
+// Attach to an element (WML-style data attribute or programmatic)
+window.SetContextMenu("my-element", ctxMenu)
 ```
 
-### File Dialogs
+### Menu roles
+
+`application.AppMenu`, `application.EditMenu`, `application.WindowMenu` provide platform-standard menus (mostly macOS).
+
+---
+
+## System Tray
 
 ```go
-// Open file
-path, err := app.Dialog.OpenFile().
-    SetTitle("Select File").
-    AddFilter("Images", "*.png;*.jpg").
-    PromptForSingleSelection()
+tray := app.NewSystemTray()
+tray.SetLabel("My App")                 // Windows/Linux: tray label
+tray.SetIcon(iconBytes)                 // tray icon
+tray.SetMenu(myMenu)                    // attach a menu
 
-// Save file
-path, err := app.Dialog.SaveFile().
-    SetTitle("Save As").
-    SetFilename("document.pdf").
-    AddFilter("PDF", "*.pdf").
-    PromptForSingleSelection()
-
-// Open folder
-path, err := app.Dialog.OpenFile().
-    SetTitle("Select Folder").
-    CanChooseDirectories(true).
-    CanChooseFiles(false).
-    PromptForSingleSelection()
+app.SetSystemTray(tray)
 ```
 
 ---
@@ -281,7 +193,7 @@ app.Clipboard   // Clipboard read/write
 app.Screen      // Screen info
 app.SystemTray  // System tray icon & menu
 app.Browser     // Open URLs in system browser
-app.Env         // Environment variables
+app.Env         // Environment info
 ```
 
 **Examples:**
@@ -296,19 +208,13 @@ primary := app.Screen.GetPrimary()
 
 // Browser
 app.Browser.OpenURL("https://wails.io")
-```
 
----
+// Environment info (struct with debug/build/platform info)
+env := app.Env()
 
-## Logger
-
-Structured logger available on the app instance.
-
-```go
-app.Logger.Info("Message", "key", "value")
-app.Logger.Debug("Debug info", "detail", detail)
-app.Logger.Warn("Warning", "threshold", threshold)
-app.Logger.Error("Error occurred", "error", err)
+// Dock / taskbar
+app.Dock().Show()           // macOS dock / Windows taskbar / Linux
+app.Dock().Hide()
 ```
 
 ---
@@ -381,7 +287,6 @@ package main
 import (
     "fmt"
     "log/slog"
-    "time"
 
     "github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -417,7 +322,7 @@ func main() {
     app.RegisterService(application.NewService(greetSvc))
 
     // Subscribe to shutdown for cleanup
-    app.Event.OnApplicationEvent(application.EventApplicationShutdown, func(e *application.ApplicationEvent) {
+    app.OnShutdown(func() {
         fmt.Println("Goodbye!")
     })
 
@@ -428,7 +333,7 @@ func main() {
         Height:           768,
         BackgroundColour: application.NewRGB(255, 255, 255),
     })
-    window.Centre()
+    window.Center()
     window.Show()
 
     if err := app.Run(); err != nil {
