@@ -92,7 +92,20 @@ export default function TaskPanel({ onOpenThread }: Props) {
           {tasks.map(t => {
             const meta = statusMeta[t.status] ?? { label: t.status, cls: 'fail' }
             return (
-              <div key={t.id} className="task-item" title={t.error || t.title} onClick={() => onOpenThread(t.sessionId)}>
+              <div
+                key={t.id}
+                className="task-item"
+                title={t.error || t.title}
+                role="button"
+                tabIndex={0}
+                onClick={() => onOpenThread(t.sessionId)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    onOpenThread(t.sessionId)
+                  }
+                }}
+              >
                 <Badge variant="outline" className={`task-badge b-${meta.cls}`}>
                   {meta.cls === 'running' && <span className="running-dot" />}
                   {meta.label}
@@ -106,6 +119,7 @@ export default function TaskPanel({ onOpenThread }: Props) {
                     disabled={busy === t.id}
                     onClick={e => { e.stopPropagation(); recover(t) }}
                     title="从最后检查点恢复续跑"
+                    aria-label={`恢复任务 ${t.title || t.id.slice(0, 8)}`}
                   ><RotateCcw className="size-3" /> 恢复</Button>
                 )}
               </div>

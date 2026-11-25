@@ -10,4 +10,4 @@ $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
 $env:CGO_ENABLED=1
 $env:WAILS_MCP=1
-wails3 dev >> dev.log
+wails3 dev > dev.log

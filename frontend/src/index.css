@@ -1,4 +1,6 @@
 @import "tailwindcss";
+@import "katex/dist/katex.min.css";
+@import "highlight.js/styles/github-dark-dimmed.css";
 @import "./styles.css";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
@@ -61,6 +63,7 @@
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --radius-sm: calc(var(--radius) - 4px);
@@ -88,37 +91,37 @@
 }
 
 .dark {
-  /* ai-dog-agent 品牌深色（沿用原 design tokens） */
-  --background: #0d0d0d;
-  --foreground: #ececec;
-  --card: #1e1e1e;
-  --card-foreground: #ececec;
-  --popover: #252525;
-  --popover-foreground: #ececec;
-  --primary: #4a9eff;
-  --primary-foreground: #ffffff;
-  --secondary: #2d2d2d;
-  --secondary-foreground: #ececec;
-  --muted: #1a1a1a;
-  --muted-foreground: #9b9b9b;
-  --accent: #2d2d2d;
-  --accent-foreground: #ececec;
-  --destructive: #f2555a;
-  --border: #2f2f2f;
-  --input: #2f2f2f;
+  /* Codex 单色 + 一体沉浸式：整窗同一画布，控件用极轻表面区分 */
+  --background: #0b0b0b;
+  --foreground: #ededed;
+  --card: #0b0b0b;
+  --card-foreground: #ededed;
+  --popover: #161616;
+  --popover-foreground: #ededed;
+  --primary: #ededed;
+  --primary-foreground: #0b0b0b;
+  --secondary: #1c1c1c;
+  --secondary-foreground: #ededed;
+  --muted: #141414;
+  --muted-foreground: #a3a3a3;
+  --accent: #1c1c1c;
+  --accent-foreground: #ededed;
+  --destructive: #f85149;
+  --border: #232323;
+  --input: #2a2a2a;
   --ring: #4a9eff;
-  --chart-1: #4a9eff;
-  --chart-2: #4ec994;
-  --chart-3: #e2b93d;
-  --chart-4: #9b9b9b;
-  --chart-5: #f2555a;
-  --sidebar: #161616;
-  --sidebar-foreground: #ececec;
-  --sidebar-primary: #4a9eff;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #2d2d2d;
-  --sidebar-accent-foreground: #ececec;
-  --sidebar-border: #2f2f2f;
+  --chart-1: #ededed;
+  --chart-2: #a3a3a3;
+  --chart-3: #737373;
+  --chart-4: #4d4d4d;
+  --chart-5: #2e2e2e;
+  --sidebar: #0b0b0b;
+  --sidebar-foreground: #ededed;
+  --sidebar-primary: #ededed;
+  --sidebar-primary-foreground: #0b0b0b;
+  --sidebar-accent: #1c1c1c;
+  --sidebar-accent-foreground: #ededed;
+  --sidebar-border: #232323;
   --sidebar-ring: #4a9eff;
 }
 

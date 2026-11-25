@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, Save } from 'lucide-react'
+import { Plus, Save, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -7,6 +7,11 @@ import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ConfigService, TaskService } from '../../bindings/ai-dog-agent/internal/service/index.js'
+import {
+  applyGlass, loadGlass, saveGlass,
+  DEFAULT_GLASS_ALPHA, DEFAULT_GLASS_BLUR,
+  MIN_GLASS_ALPHA, MAX_GLASS_ALPHA, MIN_GLASS_BLUR, MAX_GLASS_BLUR,
+} from '../lib/glass'
 
 interface ModelConfig {
   id: string
@@ -55,7 +60,7 @@ interface AppConfig {
   shellWhitelist: string[]
 }
 
-type Tab = 'models' | 'skills' | 'mcp' | 'agents' | 'security' | 'usage'
+type Tab = 'models' | 'skills' | 'mcp' | 'agents' | 'appearance' | 'security' | 'usage'
 
 interface DailyUsageRow { date: string; calls: number; inputTokens: number; outputTokens: number; costTotal: number }
 
@@ -90,14 +95,26 @@ function toAgentSpec(a: AgentSpec) {
   }
 }
 
-function SettingsPanel() {
+function SettingsPanel({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => void }) {
   const [cfg, setCfg] = useState<AppConfig>(emptyAppConfig)
   const [agents, setAgents] = useState<AgentSpec[]>([])
   const [dir, setDir] = useState('')
   const [agentDir, setAgentDir] = useState('')
   const [tab, setTab] = useState<Tab>('models')
   const [saved, setSaved] = useState(false)
+  const [dirty, setDirty] = useState(false)
   const [error, setError] = useState('')
+  const [glassAlpha, setGlassAlpha] = useState(() => loadGlass().alpha)
+  const [glassBlur, setGlassBlur] = useState(() => loadGlass().blur)
+
+  // 外观设置即时生效并持久化（不参与配置文件的保存流程）
+  useEffect(() => {
+    applyGlass(glassAlpha, glassBlur)
+    saveGlass(glassAlpha, glassBlur)
+  }, [glassAlpha, glassBlur])
+
+  // 把脏状态上报给 App，离开设置页时统一拦截
+  useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
 
   const loadAgents = () => {
     ConfigService.GetProjectAgents()
@@ -125,6 +142,7 @@ function SettingsPanel() {
   const patch = (p: Partial<AppConfig>) => {
     setCfg(c => ({ ...c, ...p }))
     setSaved(false)
+    setDirty(true)
   }
 
   const updateModel = (i: number, p: Partial<ModelConfig>) =>
@@ -143,8 +161,11 @@ function SettingsPanel() {
   const updateMCP = (i: number, p: Partial<MCPServerConfig>) =>
     patch({ mcpServers: cfg.mcpServers.map((m, j) => j === i ? { ...m, ...p } : m) })
 
-  const updateAgent = (i: number, p: Partial<AgentSpec>) =>
+  const updateAgent = (i: number, p: Partial<AgentSpec>) => {
     setAgents(a => a.map((x, j) => j === i ? { ...x, ...p } : x))
+    setSaved(false)
+    setDirty(true)
+  }
 
   const [newWhitelistEntry, setNewWhitelistEntry] = useState('')
 
@@ -155,21 +176,39 @@ function SettingsPanel() {
     setNewWhitelistEntry('')
   }
 
+  const serialize = (c: AppConfig) => ({
+    ...c,
+    mcpServers: c.mcpServers.map(m => ({
+      ...m,
+      args: m.args.split(',').map(s => s.trim()).filter(Boolean),
+    })),
+  })
+
   const saveConfig = async () => {
     setError('')
     try {
-      await ConfigService.SaveConfig({
-        ...cfg,
-        mcpServers: cfg.mcpServers.map(m => ({
-          ...m,
-          args: m.args.split(',').map(s => s.trim()).filter(Boolean),
-        })),
-      } as any)
+      await ConfigService.SaveConfig(serialize(cfg) as any)
       setSaved(true)
+      setDirty(false)
     } catch (e) {
       setError(String(e))
     }
   }
+
+  // 点击模型行立即设为当前（与 Composer 的切换语义一致）；字段编辑仍需保存
+  const activateModel = async (id: string) => {
+    setCfg(c => ({ ...c, activeModelId: id }))
+    setError('')
+    try {
+      const current: any = await ConfigService.GetConfig()
+      current.activeModelId = id
+      await ConfigService.SaveConfig(current)
+    } catch (e) {
+      setError(String(e))
+    }
+  }
+
+  const saveCurrent = () => (tab === 'agents' ? saveAgents() : saveConfig())
 
   const saveAgents = async () => {
     setError('')
@@ -179,6 +218,7 @@ function SettingsPanel() {
       }
       loadAgents()
       setSaved(true)
+      setDirty(false)
     } catch (e) {
       setError(String(e))
     }
@@ -200,21 +240,28 @@ function SettingsPanel() {
     { id: 'skills', label: `Skills (${cfg.skills.length})` },
     { id: 'mcp', label: `MCP (${cfg.mcpServers.length})` },
     { id: 'agents', label: `项目 Agent (${agents.length})` },
+    { id: 'appearance', label: '外观' },
     { id: 'security', label: '安全' },
     { id: 'usage', label: '用量' },
   ]
 
   return (
     <div className="settings">
-      <Tabs value={tab} onValueChange={v => { setTab(v as Tab); setSaved(false); setError('') }}>
-        <TabsList variant="line" className="w-full justify-start">
+      <Tabs
+        orientation="vertical"
+        value={tab}
+        onValueChange={v => { setTab(v as Tab); setError('') }}
+        className="settings-layout"
+      >
+        <TabsList variant="line" className="settings-nav">
           {tabs.map(t => (
-            <TabsTrigger key={t.id} value={t.id} className="text-xs">{t.label}</TabsTrigger>
+            <TabsTrigger key={t.id} value={t.id} className="justify-start text-xs">{t.label}</TabsTrigger>
           ))}
         </TabsList>
-      </Tabs>
 
-      <div className="card">
+        <div className="settings-main">
+          <div className="settings-scroll">
+            <div className="card">
         {tab === 'models' && (
           <>
             <h3>模型配置（OpenAI 兼容）</h3>
@@ -223,7 +270,7 @@ function SettingsPanel() {
               <div
                 key={m.id}
                 className={`model-row${cfg.activeModelId === m.id ? ' active' : ''}`}
-                onClick={() => patch({ activeModelId: m.id })}
+                onClick={() => activateModel(m.id)}
               >
                 <div style={{ flex: 1 }}>
                   <div className="form-grid">
@@ -252,21 +299,27 @@ function SettingsPanel() {
                       onChange={e => updateModel(i, { priceOut: Number(e.target.value) })} />
                   </div>
                   <div className="row-actions">
-                    <Button variant="destructive" size="sm" onClick={e => {
-                      e.stopPropagation()
-                      patch({ models: cfg.models.filter(x => x.id !== m.id) })
-                    }}>删除</Button>
+                    <Button
+                      variant="destructive"
+                      size="icon-sm"
+                      title="删除模型"
+                      aria-label={`删除模型 ${m.name || m.model || m.id}`}
+                      onClick={e => {
+                        e.stopPropagation()
+                        patch({ models: cfg.models.filter(x => x.id !== m.id) })
+                      }}
+                    ><Trash2 /></Button>
                   </div>
                 </div>
-                <div className="meta">{cfg.activeModelId === m.id ? '当前使用' : '点击设为当前'}</div>
+                <div className="meta">{cfg.activeModelId === m.id ? '当前使用' : '点击立即设为当前'}</div>
               </div>
             ))}
             <div className="row-actions">
               <Button variant="secondary" size="sm" onClick={addModel}><Plus className="size-3.5" /> 添加模型</Button>
-              <Button size="sm" onClick={saveConfig}>{saved ? '已保存' : <><Save className="size-3.5" /> 保存配置</>}</Button>
             </div>
             <p className="hint">
               配置文件：{dir || '…'}<br />
+              点击模型行会立即设为当前模型；其它字段修改需点右下角「保存」。
               一个 OpenAI 兼容配置即可覆盖 DeepSeek / Qwen / GLM / OpenAI 等；修改模型配置后请新建会话生效。
             </p>
           </>
@@ -294,8 +347,13 @@ function SettingsPanel() {
                     <Switch checked={s.enabled} onCheckedChange={v => updateSkill(i, { enabled: v })} />
                   </div>
                   <div className="row-actions">
-                    <Button variant="destructive" size="sm" onClick={() =>
-                      patch({ skills: cfg.skills.filter(x => x.id !== s.id) })}>删除</Button>
+                    <Button
+                      variant="destructive"
+                      size="icon-sm"
+                      title="删除 Skill"
+                      aria-label={`删除 Skill ${s.name || s.id}`}
+                      onClick={() => patch({ skills: cfg.skills.filter(x => x.id !== s.id) })}
+                    ><Trash2 /></Button>
                   </div>
                 </div>
                 <div className="meta">{s.enabled ? '已启用' : '未启用'}</div>
@@ -307,7 +365,6 @@ function SettingsPanel() {
                   id: crypto.randomUUID(), name: '新 Skill', description: '', prompt: '', enabled: true,
                 }],
               })}><Plus className="size-3.5" /> 添加 Skill</Button>
-              <Button size="sm" onClick={saveConfig}>{saved ? '已保存' : <><Save className="size-3.5" /> 保存配置</>}</Button>
             </div>
           </>
         )}
@@ -339,8 +396,13 @@ function SettingsPanel() {
                     <Switch checked={m.enabled} onCheckedChange={v => updateMCP(i, { enabled: v })} />
                   </div>
                   <div className="row-actions">
-                    <Button variant="destructive" size="sm" onClick={() =>
-                      patch({ mcpServers: cfg.mcpServers.filter(x => x.id !== m.id) })}>删除</Button>
+                    <Button
+                      variant="destructive"
+                      size="icon-sm"
+                      title="删除 MCP Server"
+                      aria-label={`删除 MCP Server ${m.name || m.id}`}
+                      onClick={() => patch({ mcpServers: cfg.mcpServers.filter(x => x.id !== m.id) })}
+                    ><Trash2 /></Button>
                   </div>
                 </div>
                 <div className="meta">{m.enabled ? '已启用' : '未启用'}</div>
@@ -352,7 +414,6 @@ function SettingsPanel() {
                   id: crypto.randomUUID(), name: '新 MCP Server', command: '', args: '', env: '', enabled: true,
                 }],
               })}><Plus className="size-3.5" /> 添加 MCP Server</Button>
-              <Button size="sm" onClick={saveConfig}>{saved ? '已保存' : <><Save className="size-3.5" /> 保存配置</>}</Button>
             </div>
           </>
         )}
@@ -397,7 +458,13 @@ function SettingsPanel() {
                       onChange={e => updateAgent(i, { max_turns: Number(e.target.value) })} />
                   </div>
                   <div className="row-actions">
-                    <Button variant="destructive" size="sm" onClick={() => removeAgent(i)}>删除</Button>
+                    <Button
+                      variant="destructive"
+                      size="icon-sm"
+                      title="删除 Agent"
+                      aria-label={`删除 Agent ${a.name || '未命名'}`}
+                      onClick={() => removeAgent(i)}
+                    ><Trash2 /></Button>
                   </div>
                 </div>
                 <div className="meta">
@@ -411,7 +478,56 @@ function SettingsPanel() {
                 agent_id: '', name: '', description: '', system_prompt: '', model: '',
                 tools: '', skills: '', mcp_servers: '', max_turns: 0,
               }])}><Plus className="size-3.5" /> 添加 Agent</Button>
-              <Button size="sm" disabled={!agentDir} onClick={saveAgents}>{saved ? '已保存' : <><Save className="size-3.5" /> 保存 Agent 配置</>}</Button>
+            </div>
+          </>
+        )}
+
+        {tab === 'appearance' && (
+          <>
+            <h3>外观</h3>
+            <p className="hint">
+              毛玻璃会立即应用到标题栏、侧栏、对话区、审查栏、弹窗和输入区。
+              不透明度下限 65%，用于保证正文与次级文字的可读对比度。
+            </p>
+            <div className="form-grid">
+              <Label>面板不透明度</Label>
+              <div className="range-row">
+                <input
+                  type="range"
+                  min={Math.round(MIN_GLASS_ALPHA * 100)}
+                  max={Math.round(MAX_GLASS_ALPHA * 100)}
+                  step={1}
+                  value={Math.round(glassAlpha * 100)}
+                  onChange={e => setGlassAlpha(Number(e.target.value) / 100)}
+                />
+                <span className="range-val">{Math.round(glassAlpha * 100)}%</span>
+              </div>
+              <Label>背景模糊</Label>
+              <div className="range-row">
+                <input
+                  type="range"
+                  min={MIN_GLASS_BLUR}
+                  max={MAX_GLASS_BLUR}
+                  step={1}
+                  value={glassBlur}
+                  onChange={e => setGlassBlur(Number(e.target.value))}
+                />
+                <span className="range-val">{glassBlur}px</span>
+              </div>
+            </div>
+            <div className="row-actions">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setGlassAlpha(DEFAULT_GLASS_ALPHA)
+                  setGlassBlur(DEFAULT_GLASS_BLUR)
+                }}
+              >恢复默认</Button>
+            </div>
+            <div className="glass-preview">
+              <strong>毛玻璃预览</strong>
+              <span>正文和次级说明文字在毛玻璃背景上的实际效果，拖动上方滑块可实时调整。</span>
             </div>
           </>
         )}
@@ -429,9 +545,13 @@ function SettingsPanel() {
               {cfg.shellWhitelist.map((w, i) => (
                 <div key={w} className="whitelist-row">
                   <code className="whitelist-name">{w}</code>
-                  <Button variant="destructive" size="sm" onClick={() =>
-                    patch({ shellWhitelist: cfg.shellWhitelist.filter((_, j) => j !== i) })
-                  }>删除</Button>
+                  <Button
+                    variant="destructive"
+                    size="icon-sm"
+                    title="删除白名单项"
+                    aria-label={`删除白名单 ${w}`}
+                    onClick={() => patch({ shellWhitelist: cfg.shellWhitelist.filter((_, j) => j !== i) })}
+                  ><Trash2 /></Button>
                 </div>
               ))}
             </div>
@@ -444,7 +564,6 @@ function SettingsPanel() {
                 onKeyDown={e => { if (e.key === 'Enter') addWhitelistEntry() }}
               />
               <Button variant="secondary" size="sm" onClick={addWhitelistEntry}>添加</Button>
-              <Button size="sm" onClick={saveConfig}>{saved ? '已保存' : <><Save className="size-3.5" /> 保存配置</>}</Button>
             </div>
           </>
         )}
@@ -454,7 +573,21 @@ function SettingsPanel() {
         )}
 
         {error && <p className="hint text-destructive">保存失败：{error}</p>}
-      </div>
+            </div>
+          </div>
+          {tab !== 'usage' && tab !== 'appearance' && (
+            <div className="settings-savebar">
+              <span className={`settings-status${dirty ? ' dirty' : ''}`}>
+                {dirty ? '有未保存修改' : saved ? '已保存' : ''}
+              </span>
+              <span className="spacer" />
+              <Button size="sm" disabled={!dirty} onClick={saveCurrent}>
+                <Save className="size-3.5" /> 保存
+              </Button>
+            </div>
+          )}
+        </div>
+      </Tabs>
     </div>
   )
 }

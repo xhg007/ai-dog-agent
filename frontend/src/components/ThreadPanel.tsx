@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
+import type { ComponentType } from 'react'
 import { Events } from '@wailsio/runtime'
-import { Bot, SendHorizontal, Square } from 'lucide-react'
+import {
+  ArrowDown, Bot, Compass, FileText, FlaskConical, Folder, GitBranch, Hammer,
+  Microscope, Pencil, Search, SendHorizontal, Square, Terminal, Wrench,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
@@ -28,19 +32,18 @@ interface Usage {
   totalTokens: number
 }
 
-const toolIcons: Record<string, string> = {
-  read_file: '📄', list_files: '📁', search_code: '🔍',
-  git_diff: '🌿', git_status: '🌿', project_summary: '🧭',
-  dispatch_explorer: '🧭',
-  write_file: '✏️', edit_file: '✏️',
-  run_shell: '⌨️', go_test: '🧪', go_vet: '🔬', go_build: '🔨',
+const toolIcons: Record<string, ComponentType<{ className?: string }>> = {
+  read_file: FileText, list_files: Folder, search_code: Search,
+  git_diff: GitBranch, git_status: GitBranch, project_summary: Compass,
+  dispatch_explorer: Compass,
+  write_file: Pencil, edit_file: Pencil,
+  run_shell: Terminal, go_test: FlaskConical, go_vet: Microscope, go_build: Hammer,
 }
 
-export default function ThreadPanel({ activeId, activeTitle, wsPath, onThreadsChanged, pendingApprovals, onApprovalDone }: {
+export default function ThreadPanel({ activeId, activeTitle, wsPath, pendingApprovals, onApprovalDone }: {
   activeId: string
   activeTitle: string
   wsPath: string
-  onThreadsChanged: () => void
   pendingApprovals: PendingApproval[]
   onApprovalDone: (id: string) => void
 }) {
@@ -52,6 +55,9 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, onThreadsCh
   const [agentId, setAgentId] = useState('')
   const [threadTitle, setThreadTitle] = useState('新线程')
   const [openSteps, setOpenSteps] = useState<Record<number, boolean>>({})
+  // 仅当用户停在底部时自动跟随流式输出；向上翻阅时不抢滚动位置
+  const [atBottom, setAtBottom] = useState(true)
+  const atBottomRef = useRef(true)
 
   // 模型列表（Composer 工具条）
   const [models, setModels] = useState<any[]>([])
@@ -59,6 +65,9 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, onThreadsCh
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const streamingRef = useRef(false)
+  // 中文输入法：Enter 是选词确认，不是发送。部分浏览器 compositionend 早于 keydown，
+  // 所以同时用 composition 事件与 nativeEvent.isComposing 双重判断。
+  const composingRef = useRef(false)
 
   // 切换线程时清空并载入该会话的持久化消息历史（重启应用后可恢复）
   useEffect(() => {
@@ -68,6 +77,8 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, onThreadsCh
     setAgentId('')
     setRunning(false)
     setOpenSteps({})
+    atBottomRef.current = true
+    setAtBottom(true)
     if (activeId) {
       ChatService.GetMessages(activeId).then((hist: any[] | null) => {
         if (cancelled) return
@@ -134,13 +145,11 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, onThreadsCh
               totalTokens: e.data.totalTokens,
             })
           }
-          onThreadsChanged()
           break
         case 'chat_error':
           streamingRef.current = false
           setRunning(false)
           setMessages(m => [...m, { role: 'error', content: e.data?.message ?? '未知错误' }])
-          onThreadsChanged()
           break
         case 'model_fallback':
           setMessages(m => [...m, {
@@ -151,10 +160,27 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, onThreadsCh
       }
     })
     return () => { off() }
-  }, [activeId, onThreadsChanged])
+  }, [activeId])
 
+  const scrollToBottom = (behavior: ScrollBehavior = 'auto') => {
+    const el = scrollRef.current
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior })
+    atBottomRef.current = true
+    setAtBottom(true)
+  }
+
+  const onMessagesScroll = () => {
+    const el = scrollRef.current
+    if (!el) return
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+    atBottomRef.current = nearBottom
+    setAtBottom(nearBottom)
+  }
+
+  // 用户上翻阅读时不抢滚动位置；只有停在底部才跟随新消息
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
+    if (atBottomRef.current) scrollToBottom()
   }, [messages, pendingApprovals])
 
   const send = () => {
@@ -163,10 +189,14 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, onThreadsCh
     setInput('')
     setUsage(null)
     if (messages.length === 0) setThreadTitle(text.slice(0, 30))
+    atBottomRef.current = true
+    setAtBottom(true)
     setMessages(m => [...m, { role: 'user', content: text }])
     setRunning(true)
     ChatService.SendMessage(activeId, text).catch(err => {
       setRunning(false)
+      // 发送失败把草稿还回输入框（若用户已重新输入则不覆盖），方便直接重试
+      setInput(prev => prev || text)
       setMessages(m => [...m, { role: 'error', content: String(err) }])
     })
   }
@@ -199,7 +229,8 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, onThreadsCh
         </span>
       </div>
 
-      <div className="chat-messages" ref={scrollRef}>
+      <div className="chat-scroll">
+        <div className="chat-messages" ref={scrollRef} onScroll={onMessagesScroll}>
         {isEmpty && (
           <div className="chat-empty">
             <div className="chat-empty-icon"><Bot className="size-8" /></div>
@@ -223,12 +254,27 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, onThreadsCh
           }
           if (m.role === 'tool') {
             const open = openSteps[i] ?? false
-            const icon = toolIcons[m.tool ?? ''] ?? '🛠'
+            const StepIcon = toolIcons[m.tool ?? ''] ?? Wrench
             const preview = (m.content || '').split('\n')[0] || '(无输出)'
+            const toggle = () => setOpenSteps(s => ({ ...s, [i]: !open }))
             return (
-              <div key={i} className={`step-card${open ? ' open' : ''}`} onClick={() => setOpenSteps(s => ({ ...s, [i]: !open }))}>
+              <div
+                key={i}
+                className={`step-card${open ? ' open' : ''}`}
+                role="button"
+                tabIndex={0}
+                aria-expanded={open}
+                aria-label={`工具调用 ${m.tool || '未知工具'}`}
+                onClick={toggle}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    toggle()
+                  }
+                }}
+              >
                 <div className="step-head">
-                  <span className="step-icon">{icon}</span>
+                  <span className="step-icon"><StepIcon className="size-3.5" /></span>
                   <span className="step-name">{m.tool}</span>
                   <span className="step-preview">{preview.length > 60 ? preview.slice(0, 60) + '…' : preview}</span>
                   <span className="step-caret">{open ? '▾' : '▸'}</span>
@@ -246,6 +292,19 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, onThreadsCh
             onDone={id => onApprovalDone(id)}
           />
         ))}
+        </div>
+        {!atBottom && (
+          <Button
+            variant="secondary"
+            size="icon-sm"
+            className="scroll-bottom"
+            title="回到底部"
+            aria-label="回到底部"
+            onClick={() => scrollToBottom('smooth')}
+          >
+            <ArrowDown />
+          </Button>
+        )}
       </div>
 
       <div className="composer">
@@ -256,27 +315,31 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, onThreadsCh
             value={input}
             placeholder={running ? 'Agent 执行中…' : '输入需求，Enter 发送，Shift+Enter 换行'}
             onChange={e => setInput(e.target.value)}
+            onCompositionStart={() => { composingRef.current = true }}
+            onCompositionEnd={() => { composingRef.current = false }}
             onKeyDown={e => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                send()
-              }
+              if (e.key !== 'Enter' || e.shiftKey) return
+              // 输入法合成中的 Enter 用于确认候选词，不能当发送
+              if (composingRef.current || e.nativeEvent.isComposing) return
+              e.preventDefault()
+              send()
             }}
           />
           <div className="composer-toolbar">
             {models.length > 0 && (
               <Select value={activeModelId} onValueChange={switchModel}>
-                <SelectTrigger size="sm" className="max-w-56 text-xs" title="切换模型（新线程生效）">
+                <SelectTrigger size="sm" className="max-w-48 min-w-0" title="切换模型（新线程生效）">
                   <SelectValue placeholder="选择模型" />
                 </SelectTrigger>
                 <SelectContent>
                   {models.map((m: any) => (
-                    <SelectItem key={m.id} value={m.id}>{m.name} · {m.model}</SelectItem>
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.name === m.model ? m.name : `${m.name} · ${m.model}`}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             )}
-            <span className="composer-mode">Local</span>
             <span className="spacer" />
             {running
               ? <Button variant="destructive" size="sm" onClick={cancel}><Square className="size-3" /> 中断</Button>

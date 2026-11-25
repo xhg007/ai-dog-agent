@@ -32,7 +32,8 @@ func GitRun(ws *workspace.Manager, args []string) (string, error) {
 	if err != nil {
 		return strings.TrimSpace(string(out)), fmt.Errorf("git %s 失败: %w", sub, err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	// 只去掉末尾换行，保留 porcelain 首行的前导空格（否则第一行状态位/路径会被吃掉）
+	return strings.TrimRight(string(out), "\r\n"), nil
 }
 
 // GitDiff 返回 workspace 的变更 diff。
@@ -63,7 +64,7 @@ func GitDiff(ws *workspace.Manager) (string, error) {
 			sb.WriteString(untracked)
 			sb.WriteString("\n")
 		}
-		return strings.TrimSpace(sb.String()), nil
+		return strings.TrimRight(sb.String(), "\r\n"), nil
 	}
 	return out, err
 }

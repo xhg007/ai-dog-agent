@@ -50,7 +50,7 @@ export default function Sidebar({ threads, activeId, wsPath, sideView, onSideVie
         <div className="side-label">项目</div>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="outline" size="sm" className="w-full justify-start gap-2 px-2" onClick={onBrowseWorkspace}>
+            <Button variant="outline" size="sm" className="w-full justify-start gap-2 px-3" onClick={onBrowseWorkspace} aria-label={`切换项目目录：${wsPath || '未选择'}`}>
               <FolderOpen className="size-3.5 text-primary" />
               <span className="truncate font-normal">{wsPath ? shortPath(wsPath) : '选择项目目录'}</span>
             </Button>
@@ -63,16 +63,16 @@ export default function Sidebar({ threads, activeId, wsPath, sideView, onSideVie
         <div className="flex items-center gap-1">
           <Tabs value={sideView} onValueChange={v => onSideView(v as SideView)} className="flex-1">
             <TabsList className="w-full">
-              <TabsTrigger value="threads" className="gap-1 px-2 text-xs">
+              <TabsTrigger value="threads" className="gap-1 px-3 text-xs">
                 <MessageSquare className="size-3" /> 线程
               </TabsTrigger>
-              <TabsTrigger value="tasks" className="gap-1 px-2 text-xs">任务</TabsTrigger>
+              <TabsTrigger value="tasks" className="gap-1 px-3 text-xs">任务</TabsTrigger>
             </TabsList>
           </Tabs>
           {sideView === 'threads' && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon-sm" onClick={onNew} title="新建线程">
+                <Button variant="ghost" size="icon-sm" onClick={onNew} title="新建线程" aria-label="新建线程">
                   <Plus />
                 </Button>
               </TooltipTrigger>
@@ -88,7 +88,17 @@ export default function Sidebar({ threads, activeId, wsPath, sideView, onSideVie
                 <div
                   key={t.id}
                   className={`thread-item${t.id === activeId ? ' active' : ''}`}
+                  role="button"
+                  tabIndex={0}
+                  data-thread-id={t.id}
+                  aria-current={t.id === activeId ? 'page' : undefined}
                   onClick={() => onSelect(t.id)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      onSelect(t.id)
+                    }
+                  }}
                 >
                   <div className="thread-title">
                     {t.running && <span className="running-dot" />}
@@ -101,6 +111,7 @@ export default function Sidebar({ threads, activeId, wsPath, sideView, onSideVie
                       size="icon-xs"
                       className="text-muted-foreground hover:text-destructive"
                       title="删除线程"
+                      aria-label={`删除线程 ${t.title || '新线程'}`}
                       onClick={e => { e.stopPropagation(); onDelete(t.id) }}
                     ><X /></Button>
                   </div>
