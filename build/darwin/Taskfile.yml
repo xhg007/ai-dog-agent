@@ -22,6 +22,8 @@ tasks:
     vars:
       DEFAULT_OUTPUT: '{{.BIN_DIR}}/{{.APP_NAME}}'
       OUTPUT: '{{ .OUTPUT | default .DEFAULT_OUTPUT }}'
+      # 走动态库以支持 vss 扩展（静态预构建库下 INSTALL vss 会崩溃）
+      EXTRA_TAGS: '{{.EXTRA_TAGS | default "duckdb_use_lib"}}'
 
   build:native:
     summary: Builds the application natively on macOS
@@ -43,7 +45,10 @@ tasks:
     cmds:
       - wails3 tool prepare-macos-output --dir "{{.BIN_DIR}}"
       - '{{if eq .OBFUSCATED "true"}}garble {{.GARBLE_ARGS}} build{{else}}go build{{end}} {{.BUILD_FLAGS}} -o "{{.OUTPUT}}"'
+      # 运行时需要同目录的 libduckdb.dylib（已设置 @loader_path rpath）
+      - cp "{{.DUCKDB_LIB_DIR}}/libduckdb.dylib" "{{.BIN_DIR}}/libduckdb.dylib"
     vars:
+      DUCKDB_LIB_DIR: '{{.ROOT_DIR}}/libs/duckdb-shared-libs-osx-{{.ARCH | default ARCH}}'
       BUILD_FLAGS: '{{if eq .DEV "true"}}{{if or .EXTRA_TAGS (eq .OBFUSCATED "true")}}-tags {{if eq .OBFUSCATED "true"}}wails_obfuscated{{if .EXTRA_TAGS}},{{end}}{{end}}{{.EXTRA_TAGS}} {{end}}-buildvcs=false -gcflags=all="-l"{{else}}-tags production{{if eq .OBFUSCATED "true"}},wails_obfuscated{{end}}{{if .EXTRA_TAGS}},{{.EXTRA_TAGS}}{{end}} -trimpath -buildvcs=false -ldflags="-w -s"{{end}}'
       DEFAULT_OUTPUT: '{{.BIN_DIR}}/{{.APP_NAME}}'
       OUTPUT: '{{ .OUTPUT | default .DEFAULT_OUTPUT }}'
@@ -51,8 +56,8 @@ tasks:
       GOOS: darwin
       CGO_ENABLED: 1
       GOARCH: '{{.ARCH | default ARCH}}'
-      CGO_CFLAGS: "-mmacosx-version-min=12.0"
-      CGO_LDFLAGS: "-mmacosx-version-min=12.0"
+      CGO_CFLAGS: "-I{{.DUCKDB_LIB_DIR}} -mmacosx-version-min=12.0"
+      CGO_LDFLAGS: "-L{{.DUCKDB_LIB_DIR}} -lduckdb -Wl,-rpath,@loader_path -mmacosx-version-min=12.0"
       MACOSX_DEPLOYMENT_TARGET: "12.0"
 
   build:docker:
@@ -170,6 +175,7 @@ tasks:
           cp build/darwin/Assets.car "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Resources"
         fi
       - cp "{{.BIN_DIR}}/{{.APP_NAME}}" "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/MacOS"
+      - cp "{{.BIN_DIR}}/libduckdb.dylib" "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/MacOS/libduckdb.dylib"
       - cp build/darwin/Info.plist "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents"
       - task: '{{if eq OS "darwin"}}codesign:adhoc{{else}}codesign:skip{{end}}'
 
@@ -199,6 +205,7 @@ tasks:
           cp build/darwin/Assets.car "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app/Contents/Resources"
         fi
       - cp "{{.BIN_DIR}}/{{.APP_NAME}}" "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app/Contents/MacOS"
+      - cp "{{.BIN_DIR}}/libduckdb.dylib" "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app/Contents/MacOS/libduckdb.dylib"
       - cp "build/darwin/Info.dev.plist" "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app/Contents/Info.plist"
       - xattr -cr "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app"
       - codesign --force --deep --sign - "{{.BIN_DIR}}/{{.APP_NAME}}.dev.app"

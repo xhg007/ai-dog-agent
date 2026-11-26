@@ -1,8 +1,11 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -13,22 +16,72 @@ import (
 )
 
 // DuckDBStore Store 接口的 DuckDB 实现。
-// *sql.DB 连接池本身并发安全；写操作统一经 duckdbMu 串行化，避免 DuckDB
-// 单文件写冲突（文档建议：多连接可并发读，写以互斥保护最稳妥）。
+// 并发交给 database/sql 连接池与 DuckDB 自身：同一进程内多连接可并发读，
+// 写事务由 DuckDB 内部串行化，应用层不再做单连接/互斥限制。
 type DuckDBStore struct {
 	db  *sql.DB
-	mu  chanLimiter
 	now func() time.Time // 测试注入
 }
 
-// chanLimiter 极简互斥（channel 容量 1）。
-type chanLimiter chan struct{}
-
-func (l chanLimiter) lock()   { l <- struct{}{} }
-func (l chanLimiter) unlock() { <-l }
-
 // Open 打开（或创建）DuckDB 数据库文件并建表。
+//
+// 统计是可再生数据：文件损坏时按「先删 WAL、再重建主文件」自愈，保证统计库
+// 不会阻塞应用启动。第一级只丢未 checkpoint 的数据；第二级把主文件重命名为
+// .corrupt 备份后重建空库（不直接销毁，便于人工排查）。
 func Open(path string) (*DuckDBStore, error) {
+	st, err := openConn(path)
+	if err == nil {
+		if merr := st.migrate(); merr != nil {
+			st.Close()
+			return nil, merr
+		}
+		return st, nil
+	}
+	// 内存库或空路径没有文件可自愈
+	if path == "" || path == ":memory:" {
+		return nil, err
+	}
+
+	// 1) WAL 损坏：删掉 WAL 后重试，主文件中已 checkpoint 的数据仍可用
+	if _, statErr := os.Stat(path + ".wal"); statErr == nil {
+		if rmErr := os.Remove(path + ".wal"); rmErr == nil {
+			if retried, retryErr := openAndMigrate(path); retryErr == nil {
+				slog.Warn("统计库 WAL 不可恢复，已删除 WAL（丢失未 checkpoint 的统计数据）", "path", path)
+				return retried, nil
+			}
+		}
+	}
+
+	// 2) 主文件损坏：备份为 .corrupt 后重建空库
+	if _, statErr := os.Stat(path); statErr == nil {
+		backup := path + ".corrupt"
+		_ = os.Remove(backup)
+		if renameErr := os.Rename(path, backup); renameErr == nil {
+			_ = os.Remove(path + ".wal")
+			if retried, retryErr := openAndMigrate(path); retryErr == nil {
+				slog.Warn("统计库文件损坏，已重建空库（原文件已备份）", "path", path, "backup", backup)
+				return retried, nil
+			}
+		}
+	}
+	return nil, err
+}
+
+// openAndMigrate 打开连接并建表；任一步失败都关闭连接。
+func openAndMigrate(path string) (*DuckDBStore, error) {
+	st, err := openConn(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := st.migrate(); err != nil {
+		st.Close()
+		return nil, err
+	}
+	return st, nil
+}
+
+// openConn 建立连接并 Ping（不建表）。
+func openConn(path string) (*DuckDBStore, error) {
 	db, err := sql.Open("duckdb", path)
 	if err != nil {
 		return nil, fmt.Errorf("打开 DuckDB 失败: %w", err)
@@ -37,15 +90,19 @@ func Open(path string) (*DuckDBStore, error) {
 		db.Close()
 		return nil, fmt.Errorf("连接 DuckDB 失败: %w", err)
 	}
-	s := &DuckDBStore{db: db, mu: make(chanLimiter, 1), now: time.Now}
-	if err := s.migrate(); err != nil {
-		db.Close()
-		return nil, err
-	}
-	return s, nil
+	// 并发由 database/sql 连接池与 DuckDB 自身管理，应用层不限制连接数。
+	return &DuckDBStore{db: db, now: time.Now}, nil
 }
 
 func (s *DuckDBStore) migrate() error {
+	ctx := context.Background()
+	// 初始化语句集中在同一连接上执行，用完立即归还连接池
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("获取建表连接失败: %w", err)
+	}
+	defer conn.Close()
+
 	stmts := []string{
 		`CREATE SEQUENCE IF NOT EXISTS seq_task_events`,
 		`CREATE SEQUENCE IF NOT EXISTS seq_token_usage`,
@@ -92,7 +149,7 @@ func (s *DuckDBStore) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_checkpoints_task ON checkpoints(task_id, seq)`,
 	}
 	for _, q := range stmts {
-		if _, err := s.db.Exec(q); err != nil {
+		if _, err := conn.ExecContext(ctx, q); err != nil {
 			return fmt.Errorf("建表失败: %w (sql=%s)", err, q)
 		}
 	}
@@ -108,21 +165,31 @@ func (s *DuckDBStore) CreateTask(t Task) error {
 	if created.IsZero() {
 		created = s.now()
 	}
-	s.mu.lock()
-	defer s.mu.unlock()
-	_, err := s.db.Exec(
+	ctx := context.Background()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	_, err = conn.ExecContext(ctx,
 		`INSERT INTO tasks (id, session_id, title, status, error, created_at, finished_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.SessionID, t.Title, t.Status, t.Error, created, nullableTime(t.FinishedAt))
+		t.ID, t.SessionID, t.Title, t.Status, t.Error, created, nullableTimePtr(t.FinishedAt))
 	return err
 }
 
 // UpdateTaskStatus 更新任务状态；终态时记录 finished_at。
 func (s *DuckDBStore) UpdateTaskStatus(id, status, errMsg string) error {
 	finished := isTerminal(status)
-	s.mu.lock()
-	defer s.mu.unlock()
-	_, err := s.db.Exec(
+	ctx := context.Background()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	_, err = conn.ExecContext(ctx,
 		`UPDATE tasks SET status = ?, error = ?, finished_at = ? WHERE id = ?`,
 		status, errMsg, nullableTimeIf(finished, s.now()), id)
 	return err
@@ -130,9 +197,14 @@ func (s *DuckDBStore) UpdateTaskStatus(id, status, errMsg string) error {
 
 // AppendTaskEvent 追加任务事件。
 func (s *DuckDBStore) AppendTaskEvent(taskID, evType, payload string) error {
-	s.mu.lock()
-	defer s.mu.unlock()
-	_, err := s.db.Exec(
+	ctx := context.Background()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	_, err = conn.ExecContext(ctx,
 		`INSERT INTO task_events (task_id, type, payload, created_at) VALUES (?, ?, ?, ?)`,
 		taskID, evType, payload, s.now())
 	return err
@@ -144,9 +216,14 @@ func (s *DuckDBStore) AppendTokenUsage(u TokenUsage) error {
 	if created.IsZero() {
 		created = s.now()
 	}
-	s.mu.lock()
-	defer s.mu.unlock()
-	_, err := s.db.Exec(
+	ctx := context.Background()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	_, err = conn.ExecContext(ctx,
 		`INSERT INTO token_usage (task_id, model, input_tokens, output_tokens, cost_in, cost_out, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		u.TaskID, u.Model, u.InputTokens, u.OutputTokens, u.CostIn, u.CostOut, created)
@@ -159,9 +236,14 @@ func (s *DuckDBStore) AppendCheckpoint(c Checkpoint) error {
 	if created.IsZero() {
 		created = s.now()
 	}
-	s.mu.lock()
-	defer s.mu.unlock()
-	_, err := s.db.Exec(
+	ctx := context.Background()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	_, err = conn.ExecContext(ctx,
 		`INSERT INTO checkpoints (task_id, seq, phase, tool_name, tool_args, tool_result, messages, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		c.TaskID, c.Seq, c.Phase, c.ToolName, c.ToolArgs, c.ToolResult, c.Messages, created)
@@ -170,7 +252,14 @@ func (s *DuckDBStore) AppendCheckpoint(c Checkpoint) error {
 
 // LastAfterCheckpoint 返回任务最后一个 after 检查点（无则 nil, nil）。
 func (s *DuckDBStore) LastAfterCheckpoint(taskID string) (*Checkpoint, error) {
-	row := s.db.QueryRow(
+	ctx := context.Background()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	row := conn.QueryRowContext(ctx,
 		`SELECT id, task_id, seq, phase, tool_name, tool_args, tool_result, messages, created_at
 		 FROM checkpoints WHERE task_id = ? AND phase = 'after'
 		 ORDER BY seq DESC LIMIT 1`, taskID)
@@ -198,7 +287,14 @@ var ErrNoTask = fmt.Errorf("任务不存在")
 
 // GetTask 单任务查询。
 func (s *DuckDBStore) GetTask(id string) (*Task, error) {
-	row := s.db.QueryRow(
+	ctx := context.Background()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	row := conn.QueryRowContext(ctx,
 		`SELECT id, session_id, title, status, error, created_at, finished_at
 		 FROM tasks WHERE id = ?`, id)
 	var (
@@ -212,14 +308,22 @@ func (s *DuckDBStore) GetTask(id string) (*Task, error) {
 		return nil, err
 	}
 	if finishedAt.Valid {
-		t.FinishedAt = finishedAt.Time
+		ft := finishedAt.Time
+		t.FinishedAt = &ft
 	}
 	return &t, nil
 }
 
 // CheckpointBySeq 指定序号检查点查询。
 func (s *DuckDBStore) CheckpointBySeq(taskID string, seq int64) (*Checkpoint, error) {
-	row := s.db.QueryRow(
+	ctx := context.Background()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	row := conn.QueryRowContext(ctx,
 		`SELECT id, task_id, seq, phase, tool_name, tool_args, tool_result, messages, created_at
 		 FROM checkpoints WHERE task_id = ? AND seq = ?`, taskID, seq)
 	return scanCheckpoint(row)
@@ -230,7 +334,14 @@ func (s *DuckDBStore) ListTasks(limit int) ([]Task, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	rows, err := s.db.Query(
+	ctx := context.Background()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	rows, err := conn.QueryContext(ctx,
 		`SELECT id, session_id, title, status, error, created_at, finished_at
 		 FROM tasks ORDER BY created_at DESC LIMIT ?`, limit)
 	if err != nil {
@@ -247,7 +358,8 @@ func (s *DuckDBStore) ListTasks(limit int) ([]Task, error) {
 			return nil, err
 		}
 		if finishedAt.Valid {
-			t.FinishedAt = finishedAt.Time
+			ft := finishedAt.Time
+			t.FinishedAt = &ft
 		}
 		out = append(out, t)
 	}
@@ -259,7 +371,14 @@ func (s *DuckDBStore) TaskEvents(taskID string, limit int) ([]TaskEvent, error) 
 	if limit <= 0 {
 		limit = 500
 	}
-	rows, err := s.db.Query(
+	ctx := context.Background()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	rows, err := conn.QueryContext(ctx,
 		`SELECT id, task_id, type, payload, created_at
 		 FROM task_events WHERE task_id = ? ORDER BY id ASC LIMIT ?`, taskID, limit)
 	if err != nil {
@@ -286,14 +405,21 @@ func (s *DuckDBStore) DailyUsage(days int) ([]DailyUsageRow, error) {
 	if days <= 0 {
 		days = 30
 	}
-	rows, err := s.db.Query(
+	ctx := context.Background()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	rows, err := conn.QueryContext(ctx,
 		`SELECT strftime(CAST(created_at AS DATE), '%Y-%m-%d') AS day,
 		        count(*) AS calls,
 		        sum(input_tokens) AS in_tok,
 		        sum(output_tokens) AS out_tok,
 		        sum(cost_in + cost_out) AS cost
 		 FROM token_usage
-		 WHERE created_at >= now() - INTERVAL (` + fmt.Sprint(days) + `) DAY
+		 WHERE created_at >= now() - INTERVAL (`+fmt.Sprint(days)+`) DAY
 		 GROUP BY day ORDER BY day DESC`)
 	if err != nil {
 		return nil, err
@@ -324,11 +450,12 @@ func isTerminal(status string) bool {
 	return false
 }
 
-func nullableTime(t time.Time) any {
-	if t.IsZero() {
+// nullableTimePtr 把可空时间转换为 SQL 参数（nil 写入 NULL）。
+func nullableTimePtr(t *time.Time) any {
+	if t == nil {
 		return nil
 	}
-	return t
+	return *t
 }
 
 func nullableTimeIf(cond bool, t time.Time) any {

@@ -111,7 +111,7 @@ func newRecoveryTestService(t *testing.T) *ChatService {
 	if err != nil {
 		t.Fatalf("config: %v", err)
 	}
-	return NewChatService(cfg, workspace.New(), bus, nil, "", "", tm)
+	return NewChatService(cfg, workspace.New(), bus, nil, "", "", tm, nil)
 }
 
 func mustJSON(t *testing.T, v any) string {

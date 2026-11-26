@@ -150,3 +150,101 @@ func TestCloneShellWhitelistIndependent(t *testing.T) {
 		t.Fatal("clone 应深拷贝 ShellWhitelist，修改返回值不得污染内部配置")
 	}
 }
+
+// TestSaveValidation 保存前校验：模型字段缺失、ID 重复、ActiveModelID 悬空均被拒。
+func TestSaveValidation(t *testing.T) {
+	newMgr := func() *Manager {
+		return &Manager{path: filepath.Join(t.TempDir(), "config.json"), cfg: defaultConfig()}
+	}
+	cases := []struct {
+		name string
+		cfg  Config
+	}{
+		{"模型缺少 id", Config{Models: []ModelConfig{{Name: "A", Model: "m"}}}},
+		{"模型缺少 name", Config{Models: []ModelConfig{{ID: "1", Model: "m"}}}},
+		{"模型缺少 model", Config{Models: []ModelConfig{{ID: "1", Name: "A"}}}},
+		{"模型 id 重复", Config{Models: []ModelConfig{
+			{ID: "1", Name: "A", Model: "m"},
+			{ID: "1", Name: "B", Model: "n"},
+		}}},
+		{"activeModelId 悬空", Config{ActiveModelID: "missing"}},
+		{"Skill id 重复", Config{Skills: []SkillConfig{{ID: "s"}, {ID: "s"}}}},
+		{"MCP id 重复", Config{MCPServers: []MCPServerConfig{{ID: "c"}, {ID: "c"}}}},
+		{"白名单含空项", Config{ShellWhitelist: []string{"go", " "}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := newMgr().Save(tc.cfg); err == nil {
+				t.Fatalf("应拒绝非法配置: %+v", tc.cfg)
+			}
+		})
+	}
+
+	// 合法的空配置（尚未添加模型）应允许保存
+	if err := newMgr().Save(Config{}); err != nil {
+		t.Fatalf("空配置应允许保存: %v", err)
+	}
+}
+// TestVersionIncrementsOnSave 配置版本随成功保存递增，非法保存不递增。
+func TestVersionIncrementsOnSave(t *testing.T) {
+	m := &Manager{path: filepath.Join(t.TempDir(), "config.json"), cfg: defaultConfig()}
+	if v := m.Version(); v != 0 {
+		t.Fatalf("初始版本应为 0，got %d", v)
+	}
+	if err := m.Save(Config{}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if v := m.Version(); v != 1 {
+		t.Fatalf("保存后版本应为 1，got %d", v)
+	}
+	if err := m.Save(Config{ActiveModelID: "missing"}); err == nil {
+		t.Fatal("非法配置应被拒绝")
+	}
+	if v := m.Version(); v != 1 {
+		t.Fatalf("非法保存不应递增版本，got %d", v)
+	}
+	if err := m.Save(Config{}); err != nil {
+		t.Fatal(err)
+	}
+	if v := m.Version(); v != 2 {
+		t.Fatalf("再次保存后版本应为 2，got %d", v)
+	}
+}
+// TestMCPValidation MCP 连接字段校验：transport/command/url/headers。
+func TestMCPValidation(t *testing.T) {
+	newMgr := func() *Manager {
+		return &Manager{path: filepath.Join(t.TempDir(), "config.json"), cfg: defaultConfig()}
+	}
+	bad := []struct {
+		name string
+		cfg  Config
+	}{
+		{"auto 缺 command/url", Config{MCPServers: []MCPServerConfig{{ID: "m1", Name: "m"}}}},
+		{"stdio 缺 command", Config{MCPServers: []MCPServerConfig{{ID: "m1", Name: "m", Transport: "stdio"}}}},
+		{"http 缺 url", Config{MCPServers: []MCPServerConfig{{ID: "m1", Name: "m", Transport: "http"}}}},
+		{"sse 缺 url", Config{MCPServers: []MCPServerConfig{{ID: "m1", Name: "m", Transport: "sse"}}}},
+		{"非法 transport", Config{MCPServers: []MCPServerConfig{{ID: "m1", Name: "m", Transport: "grpc", Command: "x"}}}},
+		{"headers 无等号", Config{MCPServers: []MCPServerConfig{
+			{ID: "m1", Name: "m", Transport: "http", URL: "https://x/mcp", Headers: "Authorization"},
+		}}},
+	}
+	for _, tc := range bad {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := newMgr().Save(tc.cfg); err == nil {
+				t.Fatalf("应拒绝非法 MCP 配置: %+v", tc.cfg)
+			}
+		})
+	}
+
+	ok := []Config{
+		{MCPServers: []MCPServerConfig{{ID: "m1", Name: "m", Command: "npx"}}},
+		{MCPServers: []MCPServerConfig{{ID: "m2", Name: "m", Transport: "http",
+			URL: "https://x/mcp", Headers: "Authorization=Bearer ${TOKEN}\n# comment"}}},
+		{MCPServers: []MCPServerConfig{{ID: "m3", Name: "m", Transport: "sse", URL: "https://x/sse"}}},
+	}
+	for i, cfg := range ok {
+		if err := newMgr().Save(cfg); err != nil {
+			t.Fatalf("合法配置应允许保存(%d): %v", i, err)
+		}
+	}
+}

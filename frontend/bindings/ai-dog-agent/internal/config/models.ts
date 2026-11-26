@@ -22,16 +22,33 @@ export interface Config {
 }
 
 /**
- * MCPServerConfig 外部 MCP Server 配置（stdio 启动方式）。
- * Args 为命令行参数列表；Env 为 KEY=VALUE 行（每行一条）。
+ * MCPServerConfig 外部 MCP Server 配置。
+ *   - Transport=auto（默认）：Command 非空按 stdio，否则按 http
+ *   - stdio：使用 Command/Args/Env
+ *   - http/sse：使用 URL/Headers
+ *
+ * Headers 为 KEY=VALUE 行（每行一条），值支持 ${ENV} 环境变量展开。
  */
 export interface MCPServerConfig {
     "id": string;
     "name": string;
+
+    /**
+     * auto | stdio | http | sse
+     */
+    "transport"?: string;
     "command": string;
     "args"?: string[] | null;
     "env"?: string;
+    "url"?: string;
+    "headers"?: string;
     "enabled": boolean;
+
+    /**
+     * AutoApproveReadOnly 对服务器声明 readOnlyHint=true 的工具免审批。
+     * 注解来自服务器、不可完全信任，默认关闭。
+     */
+    "autoApproveReadOnly"?: boolean;
 }
 
 /**
@@ -69,6 +86,17 @@ export interface ModelConfig {
      */
     "priceIn"?: number;
     "priceOut"?: number;
+
+    /**
+     * TimeoutSeconds 单次模型请求超时（秒）；0 表示使用默认值 300s。
+     */
+    "timeoutSeconds"?: number;
+
+    /**
+     * DisableExtraFields 关闭请求体的 agent_id/user_id 扩展字段；
+     * 部分严格的 OpenAI 兼容端点会拒绝未知字段（400）。
+     */
+    "disableExtraFields"?: boolean;
 }
 
 /**

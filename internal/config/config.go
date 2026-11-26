@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -21,6 +22,11 @@ type ModelConfig struct {
 	Model    string  `json:"model"`             // 模型 ID，如 deepseek-chat
 	PriceIn  float64 `json:"priceIn,omitempty"` // 每 1M 输入 token 单价（元）
 	PriceOut float64 `json:"priceOut,omitempty"`
+	// TimeoutSeconds 单次模型请求超时（秒）；0 表示使用默认值 300s。
+	TimeoutSeconds int `json:"timeoutSeconds,omitempty"`
+	// DisableExtraFields 关闭请求体的 agent_id/user_id 扩展字段；
+	// 部分严格的 OpenAI 兼容端点会拒绝未知字段（400）。
+	DisableExtraFields bool `json:"disableExtraFields,omitempty"`
 }
 
 // SkillConfig 可复用的技能指令包（启用后追加到主 Agent 动态上下文）。
@@ -32,15 +38,25 @@ type SkillConfig struct {
 	Enabled     bool   `json:"enabled"`
 }
 
-// MCPServerConfig 外部 MCP Server 配置（stdio 启动方式）。
-// Args 为命令行参数列表；Env 为 KEY=VALUE 行（每行一条）。
+// MCPServerConfig 外部 MCP Server 配置。
+//   - Transport=auto（默认）：Command 非空按 stdio，否则按 http
+//   - stdio：使用 Command/Args/Env
+//   - http/sse：使用 URL/Headers
+//
+// Headers 为 KEY=VALUE 行（每行一条），值支持 ${ENV} 环境变量展开。
 type MCPServerConfig struct {
-	ID      string   `json:"id"`
-	Name    string   `json:"name"`
-	Command string   `json:"command"`
-	Args    []string `json:"args,omitempty"`
-	Env     string   `json:"env,omitempty"`
-	Enabled bool     `json:"enabled"`
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Transport string   `json:"transport,omitempty"` // auto | stdio | http | sse
+	Command   string   `json:"command"`
+	Args      []string `json:"args,omitempty"`
+	Env       string   `json:"env,omitempty"`
+	URL       string   `json:"url,omitempty"`
+	Headers   string   `json:"headers,omitempty"`
+	Enabled   bool     `json:"enabled"`
+	// AutoApproveReadOnly 对服务器声明 readOnlyHint=true 的工具免审批。
+	// 注解来自服务器、不可完全信任，默认关闭。
+	AutoApproveReadOnly bool `json:"autoApproveReadOnly,omitempty"`
 }
 
 // Config 应用配置根对象。
@@ -55,9 +71,10 @@ type Config struct {
 
 // Manager 配置管理器，线程安全。
 type Manager struct {
-	mu   sync.RWMutex
-	path string
-	cfg  Config
+	mu      sync.RWMutex
+	path    string
+	cfg     Config
+	version uint64 // 每次成功保存递增（用于判断 Agent 是否需要重建）
 }
 
 // Dir 返回配置目录（并确保存在）。
@@ -125,12 +142,107 @@ func (m *Manager) Get() Config {
 	return clone(m.cfg)
 }
 
-// Save 覆盖保存配置。
+// Save 覆盖保存配置。保存前校验，避免把不可用的模型链写进磁盘：
+// 模型 ID/Name/Model 非空且 ID 唯一；ActiveModelID 非空时必须指向已存在的模型。
 func (m *Manager) Save(cfg Config) error {
+	if err := validateConfig(cfg); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.cfg = clone(cfg)
+	m.version++
 	return m.persistLocked()
+}
+
+// Version 返回配置版本（每次成功保存递增）。会话用它判断 Agent 是否需要
+// 用新配置重建（模型 / Skills / MCP 等），使切换在当前会话下一轮即生效。
+func (m *Manager) Version() uint64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.version
+}
+
+// validateConfig 配置结构校验（只校验会影响运行时构建/切换的字段）。
+func validateConfig(cfg Config) error {
+	modelIDs := make(map[string]bool, len(cfg.Models))
+	for i, mc := range cfg.Models {
+		id := strings.TrimSpace(mc.ID)
+		if id == "" {
+			return fmt.Errorf("第 %d 个模型缺少 id", i+1)
+		}
+		if modelIDs[id] {
+			return fmt.Errorf("模型 id 重复: %s", id)
+		}
+		modelIDs[id] = true
+		if strings.TrimSpace(mc.Name) == "" {
+			return fmt.Errorf("模型 %s 缺少 name（显示名）", id)
+		}
+		if strings.TrimSpace(mc.Model) == "" {
+			return fmt.Errorf("模型 %q 缺少 model（模型 ID）", mc.Name)
+		}
+	}
+	if cfg.ActiveModelID != "" && !modelIDs[cfg.ActiveModelID] {
+		return fmt.Errorf("activeModelId 指向不存在的模型: %s", cfg.ActiveModelID)
+	}
+
+	skillIDs := make(map[string]bool, len(cfg.Skills))
+	for _, sk := range cfg.Skills {
+		id := strings.TrimSpace(sk.ID)
+		if id == "" {
+			continue // 允许未分配 ID 的草稿条目
+		}
+		if skillIDs[id] {
+			return fmt.Errorf("Skill id 重复: %s", id)
+		}
+		skillIDs[id] = true
+	}
+
+	mcpIDs := make(map[string]bool, len(cfg.MCPServers))
+	for _, mcp := range cfg.MCPServers {
+		id := strings.TrimSpace(mcp.ID)
+		if id == "" {
+			continue
+		}
+		if mcpIDs[id] {
+			return fmt.Errorf("MCP Server id 重复: %s", id)
+		}
+		mcpIDs[id] = true
+
+		transport := strings.ToLower(strings.TrimSpace(mcp.Transport))
+		switch transport {
+		case "", "auto":
+			if strings.TrimSpace(mcp.Command) == "" && strings.TrimSpace(mcp.URL) == "" {
+				return fmt.Errorf("MCP Server %q 缺少 command 或 url", mcp.Name)
+			}
+		case "stdio":
+			if strings.TrimSpace(mcp.Command) == "" {
+				return fmt.Errorf("MCP Server %q（stdio）缺少 command", mcp.Name)
+			}
+		case "http", "sse":
+			if strings.TrimSpace(mcp.URL) == "" {
+				return fmt.Errorf("MCP Server %q（%s）缺少 url", mcp.Name, transport)
+			}
+		default:
+			return fmt.Errorf("MCP Server %q 的 transport 非法: %q（可选 auto/stdio/http/sse）", mcp.Name, mcp.Transport)
+		}
+		for _, line := range strings.Split(mcp.Headers, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			if !strings.Contains(line, "=") {
+				return fmt.Errorf("MCP Server %q 的 headers 行必须为 KEY=VALUE: %q", mcp.Name, line)
+			}
+		}
+	}
+
+	for _, w := range cfg.ShellWhitelist {
+		if strings.TrimSpace(w) == "" {
+			return errors.New("shellWhitelist 不能包含空项")
+		}
+	}
+	return nil
 }
 
 func (m *Manager) persistLocked() error {

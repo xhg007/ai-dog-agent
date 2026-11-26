@@ -37,6 +37,8 @@ tasks:
       # Check if a C compiler is available (gcc or clang) — cross-platform via wails3 tool
       HAS_CC:
         sh: 'wails3 tool has "gcc|clang"'
+      # 走动态库以支持 vss 扩展（静态预构建库下 INSTALL vss 会崩溃）
+      EXTRA_TAGS: '{{.EXTRA_TAGS | default "duckdb_use_lib"}}'
 
   build:native:
     summary: Builds the application natively on Linux
@@ -58,7 +60,10 @@ tasks:
         msg: "garble is required for obfuscated builds. Install it with: go install mvdan.cc/garble@v0.16.0 (requires Go 1.24+). See https://github.com/burrowers/garble/releases for version/toolchain compatibility."
     cmds:
       - '{{if eq .OBFUSCATED "true"}}garble {{.GARBLE_ARGS}} build{{else}}go build{{end}} {{.BUILD_FLAGS}} -o {{.OUTPUT}}'
+      # 运行时需要同目录的 libduckdb.so（已在 CGO_LDFLAGS 设置 $ORIGIN rpath）
+      - cp "{{.DUCKDB_LIB_DIR}}/libduckdb.so" "{{.BIN_DIR}}/libduckdb.so"
     vars:
+      DUCKDB_LIB_DIR: '{{.ROOT_DIR}}/libs/duckdb-shared-libs-linux-{{.ARCH | default ARCH}}'
       BUILD_FLAGS: '{{if eq .DEV "true"}}{{if or .EXTRA_TAGS (eq .OBFUSCATED "true")}}-tags {{if eq .OBFUSCATED "true"}}wails_obfuscated{{if .EXTRA_TAGS}},{{end}}{{end}}{{.EXTRA_TAGS}} {{end}}-buildvcs=false -gcflags=all="-l"{{else}}-tags production{{if eq .OBFUSCATED "true"}},wails_obfuscated{{end}}{{if .EXTRA_TAGS}},{{.EXTRA_TAGS}}{{end}} -trimpath -buildvcs=false -ldflags="-w -s"{{end}}'
       DEFAULT_OUTPUT: '{{.BIN_DIR}}/{{.APP_NAME}}'
       OUTPUT: '{{ .OUTPUT | default .DEFAULT_OUTPUT }}'
@@ -66,6 +71,8 @@ tasks:
       GOOS: linux
       CGO_ENABLED: 1
       GOARCH: '{{.ARCH | default ARCH}}'
+      CGO_CFLAGS: '-I{{.DUCKDB_LIB_DIR}}'
+      CGO_LDFLAGS: '-L{{.DUCKDB_LIB_DIR}} -lduckdb -Wl,-rpath,$ORIGIN'
 
   build:docker:
     summary: Builds for Linux using Docker (for non-Linux hosts or when no C compiler available)

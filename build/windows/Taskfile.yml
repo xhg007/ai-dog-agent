@@ -4,6 +4,8 @@ includes:
   common: ../Taskfile.yml
 
 vars:
+  # DuckDB 动态库目录（按平台/架构）
+
   # Signing configuration - edit these values for your project
   # SIGN_CERTIFICATE: "path/to/certificate.pfx"
   # SIGN_THUMBPRINT: "certificate-thumbprint"  # Alternative to SIGN_CERTIFICATE
@@ -27,8 +29,10 @@ tasks:
           OBFUSCATED: '{{.OBFUSCATED}}'
           GARBLE_ARGS: '{{.GARBLE_ARGS}}'
     vars:
-      # Default to CGO_ENABLED=0 if not explicitly set
-      CGO_ENABLED: '{{.CGO_ENABLED | default "0"}}'
+      # DuckDB 需要 CGO；默认开启（显式 CGO_ENABLED=0 会失去 DuckDB）
+      CGO_ENABLED: '{{.CGO_ENABLED | default "1"}}'
+      # 走动态库以支持 vss 扩展（静态预构建库下 INSTALL vss 会崩溃）
+      EXTRA_TAGS: '{{.EXTRA_TAGS | default "duckdb_use_lib"}}'
 
   build:native:
     summary: Builds the application using native Go cross-compilation
@@ -56,12 +60,17 @@ tasks:
         platforms: [windows]
       - cmd: rm -f *.syso
         platforms: [linux, darwin]
+      # Windows 加载器在进程启动时需要 duckdb.dll：放到 exe 同目录
+      - cmd: powershell -Command "Copy-Item '{{.DUCKDB_LIB_DIR}}/duckdb.dll' '{{.BIN_DIR}}/duckdb.dll' -Force"
     vars:
+      DUCKDB_LIB_DIR: '{{.ROOT_DIR}}/libs/duckdb-shared-libs-windows-{{.ARCH | default ARCH}}'
       BUILD_FLAGS: '{{if eq .DEV "true"}}{{if or .EXTRA_TAGS (eq .OBFUSCATED "true")}}-tags {{if eq .OBFUSCATED "true"}}wails_obfuscated{{if .EXTRA_TAGS}},{{end}}{{end}}{{.EXTRA_TAGS}} {{end}}-buildvcs=false -gcflags=all="-l"{{else}}-tags production{{if eq .OBFUSCATED "true"}},wails_obfuscated{{end}}{{if .EXTRA_TAGS}},{{.EXTRA_TAGS}}{{end}} -trimpath -buildvcs=false -ldflags="-w -s -H windowsgui"{{end}}'
     env:
       GOOS: windows
-      CGO_ENABLED: '{{.CGO_ENABLED | default "0"}}'
+      CGO_ENABLED: '{{.CGO_ENABLED | default "1"}}'
       GOARCH: '{{.ARCH | default ARCH}}'
+      CGO_CFLAGS: '-I{{.DUCKDB_LIB_DIR}}'
+      CGO_LDFLAGS: '-L{{.DUCKDB_LIB_DIR}} -lduckdb'
 
   build:docker:
     summary: Cross-compiles for Windows using Docker with Zig (for CGO builds on non-Windows)

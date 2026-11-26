@@ -75,7 +75,7 @@ func TestTaskLifecycleViaManager(t *testing.T) {
 		t.Fatalf("ListTasks: %v", err)
 	}
 	if len(tasks) != 1 || tasks[0].ID != id || tasks[0].Status != store.StatusFailed ||
-		tasks[0].Error != "go test 失败" || tasks[0].FinishedAt.IsZero() {
+		tasks[0].Error != "go test 失败" || tasks[0].FinishedAt == nil {
 		t.Fatalf("任务终态不符: %+v", tasks)
 	}
 	evs, _ := st.TaskEvents(id, 100)

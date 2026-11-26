@@ -290,6 +290,7 @@ function App() {
                   activeId={activeId}
                   activeTitle={threads.find(t => t.id === activeId)?.title ?? ''}
                   wsPath={wsPath}
+                  runningHint={threads.find(t => t.id === activeId)?.running ?? false}
                   pendingApprovals={approvalsByThread[activeId] ?? []}
                   onApprovalDone={id => setApprovalsByThread(m => {
                     const next: Record<string, PendingApproval[]> = {}

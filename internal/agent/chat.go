@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
 
@@ -21,6 +22,7 @@ import (
 	"ai-dog-agent/internal/config"
 	"ai-dog-agent/internal/eventbus"
 	"ai-dog-agent/internal/llm"
+	"ai-dog-agent/internal/mcp"
 	"ai-dog-agent/internal/store"
 	"ai-dog-agent/internal/task"
 	"ai-dog-agent/internal/workspace"
@@ -35,25 +37,28 @@ type ChatService struct {
 	bus        *eventbus.Bus
 	appr       *approval.Manager
 	backupRoot string
-	store      *sessionStore   // 会话持久化（一个会话一个 JSON 文件）
-	tasks      *task.Manager   // 任务生命周期（M5；nil 时跳过任务记录，仅事件推送）
+	store      *sessionStore // 会话持久化（一个会话一个 JSON 文件）
+	tasks      *task.Manager // 任务生命周期（M5；nil 时跳过任务记录，仅事件推送）
+	mcpMgr     *mcp.Manager  // 外部 MCP Server 连接（nil 时不接入 MCP 工具）
 
 	mu       sync.Mutex
 	sessions map[string]*chatSession
 }
 
 type chatSession struct {
-	id             string
-	agentID        string // Agent 唯一 ID，随请求体 agent_id 字段上送
-	agent          adk.Agent
-	runner         *adk.Runner
-	cancel         context.CancelFunc
-	running        bool
-	currentTaskID  string    // 当前轮次的任务 ID（M5）
-	title          string    // 线程标题（取首条用户消息摘要）
-	createdAt      time.Time
-	lastActive     time.Time
-	messages       []StoredMessage // 持久化消息历史
+	id            string
+	agentID       string // Agent 唯一 ID，随请求体 agent_id 字段上送
+	agent         adk.Agent
+	runner        *adk.Runner
+	cancel        context.CancelFunc
+	running       bool
+	currentTaskID string // 当前轮次的任务 ID（M5）
+	title         string // 线程标题（取首条用户消息摘要）
+	modelName     string // 构建 Agent 时使用的主模型显示名（chat_started 事件上报）
+	createdAt     time.Time
+	lastActive    time.Time
+	messages      []StoredMessage // 持久化消息历史
+	configVersion uint64          // 构建 Agent 时的配置版本（变更后下一轮重建）
 }
 
 // SessionInfo 线程列表条目（对齐 Codex 左栏 Threads）。
@@ -68,7 +73,8 @@ type SessionInfo struct {
 // NewChatService 创建服务实例，并从 sessionDir 恢复历史会话。
 // tasks 为任务管理器（M5 FR-5.2）；传 nil 时跳过任务记录（仅事件推送）。
 func NewChatService(cfg *config.Manager, ws *workspace.Manager, bus *eventbus.Bus,
-	appr *approval.Manager, backupRoot, sessionDir string, tasks *task.Manager) *ChatService {
+	appr *approval.Manager, backupRoot, sessionDir string, tasks *task.Manager,
+	mcpMgr *mcp.Manager) *ChatService {
 	s := &ChatService{
 		cfg:        cfg,
 		ws:         ws,
@@ -76,6 +82,7 @@ func NewChatService(cfg *config.Manager, ws *workspace.Manager, bus *eventbus.Bu
 		appr:       appr,
 		backupRoot: backupRoot,
 		tasks:      tasks,
+		mcpMgr:     mcpMgr,
 		sessions:   make(map[string]*chatSession),
 	}
 	// 注册全局观测 handler（M5）：tasks 非 nil 时才注册，避免测试中重复注册全局 handler
@@ -89,7 +96,7 @@ func NewChatService(cfg *config.Manager, ws *workspace.Manager, bus *eventbus.Bu
 	}
 	if sessionDir != "" {
 		s.store = newSessionStore(sessionDir)
-		if err := s.RestoreSessions(); err != nil {
+		if err := s.restoreSessions(); err != nil {
 			slog.Error("恢复历史会话失败", "err", err)
 		}
 	}
@@ -137,6 +144,11 @@ func (s *ChatService) DeleteSession(sessionID string) bool {
 	if sess.cancel != nil {
 		sess.cancel()
 	}
+	// 撤下该会话挂起的审批，避免工具 goroutine 永久阻塞、卡片残留在前端
+	if s.appr != nil {
+		s.appr.CancelSession(sessionID)
+		s.appr.ForgetSession(sessionID)
+	}
 	delete(s.sessions, sessionID)
 	if s.store != nil {
 		if err := s.store.delete(sessionID); err != nil {
@@ -146,42 +158,58 @@ func (s *ChatService) DeleteSession(sessionID string) bool {
 	return true
 }
 
-// EnsureSession 注册前端已有的会话 ID（幂等，不存在则创建）。
-func (s *ChatService) EnsureSession(sessionID string) {
-	if sessionID == "" {
-		return
-	}
+// claimSession 原子地「检查空闲并占用」会话。
+// 检查与占用必须在同一临界区内完成：否则并发两次 SendMessage 会同时通过
+// running 检查，同一会话并行执行两轮、历史被写两遍。
+func (s *ChatService) claimSession(sessionID string) (*chatSession, error) {
 	s.mu.Lock()
-	if _, ok := s.sessions[sessionID]; !ok {
-		now := time.Now()
-		s.sessions[sessionID] = &chatSession{id: sessionID, agentID: uuid.NewString(), createdAt: now, lastActive: now}
-		s.persistLocked(s.sessions[sessionID])
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[sessionID]
+	if !ok {
+		return nil, fmt.Errorf("会话不存在: %s", sessionID)
 	}
+	if sess.running {
+		return nil, errors.New("当前会话正在执行中，请等待完成或先中断")
+	}
+	sess.running = true
+	return sess, nil
+}
+
+// releaseSession 复位占用状态（SendMessage 前置步骤失败时调用）。
+func (s *ChatService) releaseSession(sess *chatSession) {
+	s.mu.Lock()
+	sess.running = false
 	s.mu.Unlock()
+}
+
+// configChanged 报告会话 Agent 构建后配置是否已变更（调用方持有 s.mu）。
+func (s *ChatService) configChanged(sess *chatSession) bool {
+	return sess.configVersion != s.cfg.Version()
 }
 
 // SendMessage 向指定会话发送用户消息，异步执行，过程与结果通过事件流推送。
 func (s *ChatService) SendMessage(sessionID string, content string) error {
-	s.mu.Lock()
-	sess, ok := s.sessions[sessionID]
-	if !ok {
-		s.mu.Unlock()
-		return fmt.Errorf("会话不存在: %s", sessionID)
+	sess, err := s.claimSession(sessionID)
+	if err != nil {
+		return err
 	}
-	if sess.running {
-		s.mu.Unlock()
-		return errors.New("当前会话正在执行中，请等待完成或先中断")
-	}
-	s.mu.Unlock()
 
 	// 模型按当前激活配置构建（在 initAgentLocked 中完成）；修改模型配置后新建会话生效。
 	if _, err := s.cfg.ActiveModel(); err != nil {
+		s.releaseSession(sess)
 		return err
 	}
 
 	s.mu.Lock()
+	// 配置（模型 / Skills / MCP）变更后旧 Agent 已过期：下一轮沿用会话历史重建，
+	// 使设置页的保存与模型切换对当前会话立即生效。
+	if sess.agent != nil && s.configChanged(sess) {
+		sess.agent = nil
+		sess.runner = nil
+	}
 	if sess.agent == nil {
 		if err := s.initAgentLocked(sess); err != nil {
+			sess.running = false
 			s.mu.Unlock()
 			return err
 		}
@@ -209,7 +237,7 @@ func (s *ChatService) SendMessage(sessionID string, content string) error {
 
 	bus := s.bus
 	bus.Emit(eventbus.Event{Type: eventbus.EvChatStarted, SessionID: sessionID,
-		Data: eventbus.ChatStartedData{AgentID: sess.agentID}})
+		Data: eventbus.ChatStartedData{AgentID: sess.agentID, Model: sess.modelName}})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s.mu.Lock()
@@ -269,13 +297,19 @@ func (s *ChatService) initAgentLocked(sess *chatSession) error {
 	}
 
 	extras := s.buildDynamicExtras()
+	// 外部 MCP 工具：启用的 server 懒连接并包装；单个 server 失败只跳过（不阻塞会话）
+	var mcpTools []tool.BaseTool
+	if s.mcpMgr != nil {
+		mcpTools = s.mcpMgr.Tools(ctx, s.cfg.Get().MCPServers, s.ws.Root(), sess.id)
+	}
 	var ag adk.Agent
 	if s.ws.IsSet() {
-		// workspace 已设置：主 Agent 携带 explorer 分派工具 + 写操作审批工具 + 执行工具
-		ag, err = BuildOrchestrator(ctx, s.ws, cm, s.appr, s.backupRoot, sess.id, s.cfg.ShellWhitelist(), extras)
+		// workspace 已设置：主 Agent 携带 explorer 分派工具 + 写操作审批工具 + 执行工具 + MCP 工具
+		ag, err = BuildOrchestrator(ctx, s.ws, cm, s.appr, s.backupRoot, sess.id,
+			s.cfg.ShellWhitelist(), extras, mcpTools)
 	} else {
-		// 未设置 workspace：纯对话模式
-		ag, err = newPlainOrchestrator(ctx, cm, extras)
+		// 未设置 workspace：纯对话模式（仍可携带 MCP 工具）
+		ag, err = newPlainOrchestrator(ctx, cm, extras, mcpTools)
 	}
 	if err != nil {
 		return fmt.Errorf("构建 Agent 失败: %w", err)
@@ -285,6 +319,10 @@ func (s *ChatService) initAgentLocked(sess *chatSession) error {
 		Agent:           ag,
 		EnableStreaming: true,
 	})
+	// 记录主模型显示名：chat_started 事件如实上报，供会话头部展示
+	sess.modelName = modelName
+	// 记录构建时的配置版本：Settings 保存后 configChanged 为 true，下一轮重建
+	sess.configVersion = s.cfg.Version()
 	slog.Info("会话 Agent 已构建", "session", sess.id, "agentId", sess.agentID,
 		"model", modelName, "bodyField", llm.BodyAgentIDField)
 	return nil
@@ -319,9 +357,11 @@ func (s *ChatService) buildDynamicExtras() string {
 		}
 	}
 	if len(servers) > 0 {
-		sb.WriteString("\n\n# 已配置 MCP Server（客户端接入将在 M6 提供，当前仅作为上下文）\n")
+		// 只列名称：Command/Args/URL 可能含密钥（例如 URL query 里的 token），
+		// 系统提示词会随每次模型请求上送供应商，不应携带连接凭据。
+		sb.WriteString("\n\n# 已启用 MCP Server（工具已注入，名为 mcp_<server>_<tool>，调用需用户审批）\n")
 		for _, m := range servers {
-			fmt.Fprintf(&sb, "- %s：%s %s\n", m.Name, m.Command, strings.Join(m.Args, " "))
+			fmt.Fprintf(&sb, "- %s\n", m.Name)
 		}
 	}
 

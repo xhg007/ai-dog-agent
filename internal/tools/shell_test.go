@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"errors"
 	"runtime"
 	"strings"
@@ -19,7 +20,7 @@ func TestShellRun_WhitelistedExecutes(t *testing.T) {
 	bus := eventbus.New()
 	sub, cancel := bus.Subscribe()
 	defer cancel()
-	out, err := ShellRun(ws, []string{"go"}, nil, "s1", "go version")
+	out, err := ShellRun(context.Background(), ws, []string{"go"}, nil, "s1", "go version")
 	if err != nil {
 		t.Fatalf("白名单内命令应直接执行: %v", err)
 	}
@@ -44,7 +45,7 @@ func TestShellRun_OutsideWhitelistRequiresApproval(t *testing.T) {
 	done := make(chan result, 1)
 	go func() {
 		// go 不在白名单，但真实存在：批准后应成功执行
-		out, err := ShellRun(ws, []string{"git"}, appr, "s1", "go version")
+		out, err := ShellRun(context.Background(), ws, []string{"git"}, appr, "s1", "go version")
 		done <- result{out, err}
 	}()
 	mustApprove(appr)
@@ -63,7 +64,7 @@ func TestShellRun_OutsideWhitelistDenied(t *testing.T) {
 	appr := approval.New(eventbus.New())
 	done := make(chan error, 1)
 	go func() {
-		_, err := ShellRun(ws, []string{"git"}, appr, "s1", "go version")
+		_, err := ShellRun(context.Background(), ws, []string{"git"}, appr, "s1", "go version")
 		done <- err
 	}()
 	deadline := time.Now().Add(2 * time.Second)
@@ -82,7 +83,7 @@ func TestShellRun_OutsideWhitelistDenied(t *testing.T) {
 // TestShellRun_OutsideWhitelistNoApprover 无审批管理器时白名单外命令直接拒绝。
 func TestShellRun_OutsideWhitelistNoApprover(t *testing.T) {
 	ws, _ := writeSetupWS(t)
-	_, err := ShellRun(ws, []string{"git"}, nil, "s1", "go version")
+	_, err := ShellRun(context.Background(), ws, []string{"git"}, nil, "s1", "go version")
 	if err == nil {
 		t.Fatal("白名单外且无审批器应拒绝执行")
 	}
@@ -97,7 +98,7 @@ func TestShellRun_GitWriteRequiresApproval(t *testing.T) {
 	appr := approval.New(eventbus.New())
 	done := make(chan error, 1)
 	go func() {
-		_, err := ShellRun(ws, []string{"git"}, appr, "s1", "git push origin main")
+		_, err := ShellRun(context.Background(), ws, []string{"git"}, appr, "s1", "git push origin main")
 		done <- err
 	}()
 	deadline := time.Now().Add(2 * time.Second)
@@ -130,7 +131,7 @@ func TestShellRun_Timeout(t *testing.T) {
 	default:
 		cmd = "ping -c 30 127.0.0.1"
 	}
-	_, err := ShellRun(ws, []string{"ping"}, nil, "s1", cmd)
+	_, err := ShellRun(context.Background(), ws, []string{"ping"}, nil, "s1", cmd)
 	if err == nil {
 		t.Fatal("超时命令应返回错误")
 	}
@@ -142,7 +143,7 @@ func TestShellRun_Timeout(t *testing.T) {
 // TestShellRun_NoShellInterpretation 分隔符不经 shell 解释，不会拼接执行。
 func TestShellRun_NoShellInterpretation(t *testing.T) {
 	ws, _ := writeSetupWS(t)
-	out, err := ShellRun(ws, []string{"git"}, nil, "s1", "git status && echo hacked")
+	out, err := ShellRun(context.Background(), ws, []string{"git"}, nil, "s1", "git status && echo hacked")
 	if err == nil {
 		t.Fatalf("含分隔符的命令应被程序本身拒绝: out=%q", out)
 	}
@@ -168,5 +169,65 @@ func TestTruncateOutput(t *testing.T) {
 	}
 	if !strings.HasPrefix(got, strings.Repeat("x", 50)) {
 		t.Fatalf("截断应保留前缀内容: %q", got)
+	}
+}
+
+// TestShellRun_ContextCancel 父 ctx 取消时命令被终止并返回「中断」错误。
+func TestShellRun_ContextCancel(t *testing.T) {
+	ws, _ := writeSetupWS(t)
+	var cmd string
+	switch runtime.GOOS {
+	case "windows":
+		cmd = "ping -n 30 127.0.0.1"
+	default:
+		cmd = "ping -c 30 127.0.0.1"
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		cancel()
+	}()
+	_, err := ShellRun(ctx, ws, []string{"ping"}, nil, "s1", cmd)
+	if err == nil {
+		t.Fatal("取消后命令应返回错误")
+	}
+	if !strings.Contains(err.Error(), "中断") {
+		t.Fatalf("错误应说明被中断: %v", err)
+	}
+}
+// TestSplitCommand 引号分词：支持空格路径与未闭合引号报错，反斜杠按字面保留。
+func TestSplitCommand(t *testing.T) {
+	cases := []struct {
+		in      string
+		want    []string
+		wantErr bool
+	}{
+		{`go test ./...`, []string{"go", "test", "./..."}, false},
+		{`a "b c" d`, []string{"a", "b c", "d"}, false},
+		{`a 'b c' d`, []string{"a", "b c", "d"}, false},
+		{`"C:\my project\a.go" x`, []string{`C:\my project\a.go`, "x"}, false},
+		{`a "b \"c\"" d`, []string{"a", `b "c"`, "d"}, false},
+		{`"unterminated`, nil, true},
+		{`   `, nil, false},
+	}
+	for _, c := range cases {
+		got, err := splitCommand(c.in)
+		if c.wantErr {
+			if err == nil {
+				t.Fatalf("splitCommand(%q) 应报错", c.in)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("splitCommand(%q) 失败: %v", c.in, err)
+		}
+		if len(got) != len(c.want) {
+			t.Fatalf("splitCommand(%q) = %v, want %v", c.in, got, c.want)
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Fatalf("splitCommand(%q)[%d] = %q, want %q", c.in, i, got[i], c.want[i])
+			}
+		}
 	}
 }

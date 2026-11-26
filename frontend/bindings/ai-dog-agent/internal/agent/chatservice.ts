@@ -31,13 +31,6 @@ export function DeleteSession(sessionID: string): $CancellablePromise<boolean> {
 }
 
 /**
- * EnsureSession 注册前端已有的会话 ID（幂等，不存在则创建）。
- */
-export function EnsureSession(sessionID: string): $CancellablePromise<void> {
-    return $Call.ByID(887375237, sessionID);
-}
-
-/**
  * GetMessages 返回指定会话的持久化消息历史（供前端切换线程时恢复）。
  */
 export function GetMessages(sessionID: string): $CancellablePromise<$models.StoredMessage[] | null> {
@@ -63,13 +56,6 @@ export function NewSession(): $CancellablePromise<string> {
  */
 export function RecoverTask(taskID: string): $CancellablePromise<void> {
     return $Call.ByID(3679412190, taskID);
-}
-
-/**
- * RestoreSessions 从磁盘恢复会话（应用启动时调用）。执行中的状态复位为未运行。
- */
-export function RestoreSessions(): $CancellablePromise<void> {
-    return $Call.ByID(237522324);
 }
 
 /**

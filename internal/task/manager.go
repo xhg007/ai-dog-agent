@@ -64,6 +64,9 @@ func (m *Manager) Finish(sessionID, taskID, status, errMsg string) error {
 	if m.current[sessionID] == taskID {
 		delete(m.current, sessionID)
 	}
+	// 任务已终结：检查点序号计数器不再需要（否则每个任务留一条，长期累积）。
+	// 迟到的 checkpoint 会重新从 1 开始，对已结束任务无影响。
+	delete(m.seq, taskID)
 	m.mu.Unlock()
 	m.pushState(sessionID, taskID, "", status, errMsg)
 	m.appendEvent(taskID, eventbus.EvTaskState, eventbus.TaskStateData{
@@ -121,7 +124,7 @@ func (m *Manager) CheckpointBySeq(taskID string, seq int64) (*store.Checkpoint, 
 }
 
 // ListTasks / TaskEvents / DailyUsage 读透传（TaskService RPC 用）。
-func (m *Manager) ListTasks(limit int) ([]store.Task, error)    { return m.store.ListTasks(limit) }
+func (m *Manager) ListTasks(limit int) ([]store.Task, error) { return m.store.ListTasks(limit) }
 func (m *Manager) TaskEvents(id string, n int) ([]store.TaskEvent, error) {
 	return m.store.TaskEvents(id, n)
 }

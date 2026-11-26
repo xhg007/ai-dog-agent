@@ -87,7 +87,7 @@ func TestBuildExplorerAgent(t *testing.T) {
 
 func TestBuildOrchestratorWithExplorer(t *testing.T) {
 	ws := setupProjectWS(t)
-	ag, err := BuildOrchestrator(context.Background(), ws, &fakeModel{}, nil, "", "", nil)
+	ag, err := BuildOrchestrator(context.Background(), ws, &fakeModel{}, nil, "", "", nil, "", nil)
 	if err != nil {
 		t.Fatalf("BuildOrchestrator 失败: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestBuildOrchestratorWithExplorer(t *testing.T) {
 func TestBuildOrchestratorWithWriteTools(t *testing.T) {
 	ws := setupProjectWS(t)
 	appr := approval.New(eventbus.New())
-	ag, err := BuildOrchestrator(context.Background(), ws, &fakeModel{}, appr, t.TempDir(), "s-test", nil)
+	ag, err := BuildOrchestrator(context.Background(), ws, &fakeModel{}, appr, t.TempDir(), "s-test", nil, "", nil)
 	if err != nil {
 		t.Fatalf("BuildOrchestrator(含写工具) 失败: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestBuildOrchestratorWithWriteTools(t *testing.T) {
 func TestOrchestratorToolsIncludeExecTools(t *testing.T) {
 	ws := setupProjectWS(t)
 	appr := approval.New(eventbus.New())
-	toolList, err := OrchestratorTools(context.Background(), ws, &fakeModel{}, appr, t.TempDir(), "s-test", []string{"go", "git"})
+	toolList, err := OrchestratorTools(context.Background(), ws, &fakeModel{}, appr, t.TempDir(), "s-test", []string{"go", "git"}, nil)
 	if err != nil {
 		t.Fatalf("OrchestratorTools 失败: %v", err)
 	}

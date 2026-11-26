@@ -3,6 +3,7 @@
 
 /**
  * TaskService 任务查询与统计 RPC（M5 FR-5.2/5.4，前端任务面板与用量 Tab）。
+ * 返回具体类型而非 any，让 Wails 生成的 TS binding 强类型可用。
  * @module
  */
 
@@ -10,23 +11,27 @@
 // @ts-ignore: Unused imports
 import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wailsio/runtime";
 
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as store$0 from "../store/models.js";
+
 /**
  * GetDailyUsage 近 days 天按日聚合的 Token 用量与成本报表。
  */
-export function GetDailyUsage(days: number): $CancellablePromise<any> {
+export function GetDailyUsage(days: number): $CancellablePromise<store$0.DailyUsageRow[] | null> {
     return $Call.ByID(2827425288, days);
 }
 
 /**
  * GetTaskEvents 任务事件流（升序）。
  */
-export function GetTaskEvents(taskID: string, limit: number): $CancellablePromise<any> {
+export function GetTaskEvents(taskID: string, limit: number): $CancellablePromise<store$0.TaskEvent[] | null> {
     return $Call.ByID(1962784496, taskID, limit);
 }
 
 /**
  * ListTasks 最近任务列表（created_at 降序）。
  */
-export function ListTasks(limit: number): $CancellablePromise<any> {
+export function ListTasks(limit: number): $CancellablePromise<store$0.Task[] | null> {
     return $Call.ByID(879950682, limit);
 }

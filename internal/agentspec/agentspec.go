@@ -31,6 +31,16 @@ func Dir(root string) string {
 	return filepath.Join(root, ".aidog", "agents")
 }
 
+// windowsReservedNames Windows 保留设备名（大小写不敏感，带扩展名同样非法）。
+// 跨平台统一拒绝：Agent 配置随项目走，同一份 .aidog 可能在 Windows 上打开。
+var windowsReservedNames = map[string]bool{
+	"con": true, "prn": true, "aux": true, "nul": true,
+	"com1": true, "com2": true, "com3": true, "com4": true, "com5": true,
+	"com6": true, "com7": true, "com8": true, "com9": true,
+	"lpt1": true, "lpt2": true, "lpt3": true, "lpt4": true, "lpt5": true,
+	"lpt6": true, "lpt7": true, "lpt8": true, "lpt9": true,
+}
+
 func validateName(name string) error {
 	n := strings.TrimSpace(name)
 	if n == "" {
@@ -38,6 +48,15 @@ func validateName(name string) error {
 	}
 	if n == "." || n == ".." || strings.ContainsAny(n, `/\`) || strings.Contains(n, "..") {
 		return fmt.Errorf("非法 Agent 名称: %q", name)
+	}
+	// 文件名非法字符：Windows 上这些字符会让 os.WriteFile 直接失败，
+	// 提前给出可读错误，避免用户看到系统原始报错。
+	if strings.ContainsAny(n, `:*?"<>|`) || strings.ContainsFunc(n, func(r rune) bool { return r < 0x20 }) {
+		return fmt.Errorf("Agent 名称含非法文件名字符（不允许 : * ? \" < > | 与控制字符）: %q", name)
+	}
+	base := strings.ToLower(strings.TrimSuffix(n, filepath.Ext(n)))
+	if windowsReservedNames[base] {
+		return fmt.Errorf("Agent 名称是系统保留名: %q", name)
 	}
 	return nil
 }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cloudwego/eino/schema"
 
@@ -133,5 +134,69 @@ func TestDeepSeekLive(t *testing.T) {
 	t.Logf("模型回复: %s", out)
 	if out == "" {
 		t.Fatal("模型回复为空")
+	}
+}
+
+// TestModelTimeout 超时配置：0/负值回退默认 300s，正数按秒生效。
+func TestModelTimeout(t *testing.T) {
+	cases := []struct {
+		sec  int
+		want time.Duration
+	}{
+		{0, 300 * time.Second},
+		{-5, 300 * time.Second},
+		{60, time.Minute},
+		{1, time.Second},
+	}
+	for _, c := range cases {
+		if got := modelTimeout(config.ModelConfig{TimeoutSeconds: c.sec}); got != c.want {
+			t.Fatalf("TimeoutSeconds=%d: got %v, want %v", c.sec, got, c.want)
+		}
+	}
+}
+
+// TestExtraFields agent_id 注入受 agentID 与 DisableExtraFields 双开关控制。
+func TestExtraFields(t *testing.T) {
+	f := extraFields(config.ModelConfig{}, "a1")
+	if f[BodyAgentIDField] != "a1" || f[BodyUserIDField] != "a1" {
+		t.Fatalf("默认应注入 agent_id/user_id: %v", f)
+	}
+	if f := extraFields(config.ModelConfig{DisableExtraFields: true}, "a1"); len(f) != 0 {
+		t.Fatalf("关闭开关后不应注入: %v", f)
+	}
+	if f := extraFields(config.ModelConfig{}, ""); len(f) != 0 {
+		t.Fatalf("agentID 为空时不应注入: %v", f)
+	}
+}
+
+// TestDisableExtraFieldsNoBodyField 关闭开关后真实请求体不含 agent_id。
+func TestDisableExtraFieldsNoBodyField(t *testing.T) {
+	var hasField bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err == nil {
+			_, hasField = payload[BodyAgentIDField]
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"1","object":"chat.completion","created":1,"model":"test",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer srv.Close()
+
+	mc := config.ModelConfig{
+		ID: "t3", Name: "local", BaseURL: srv.URL, APIKey: "sk-test", Model: "test-model",
+		DisableExtraFields: true,
+	}
+	cm, err := BuildModel(context.Background(), mc, "agent-x")
+	if err != nil {
+		t.Fatalf("BuildModel 失败: %v", err)
+	}
+	if _, err := cm.Generate(context.Background(), []*schema.Message{schema.UserMessage("hi")}); err != nil {
+		t.Fatalf("Generate 失败: %v", err)
+	}
+	if hasField {
+		t.Fatalf("关闭开关后不应注入 %s 字段", BodyAgentIDField)
 	}
 }

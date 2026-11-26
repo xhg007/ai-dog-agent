@@ -4,6 +4,7 @@
 package approval
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -49,6 +50,15 @@ func New(bus *eventbus.Bus) *Manager {
 // 返回 true 表示批准；拒绝返回 ErrDenied。
 // sessionID+tool+path 已被记住时直接放行。
 func (m *Manager) Request(sessionID, tool, path, preview string) (bool, error) {
+	return m.RequestContext(context.Background(), sessionID, tool, path, preview)
+}
+
+// RequestContext 同 Request，但等待期间可由 ctx 取消（用户中断/会话删除）。
+// 取消时撤下待审批项并推送 approval_decided，调用方不会永久阻塞。
+func (m *Manager) RequestContext(ctx context.Context, sessionID, tool, path, preview string) (bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	key := tool + ":" + path
 	m.mu.Lock()
 	if m.remembered[sessionID][key] {
@@ -66,7 +76,19 @@ func (m *Manager) Request(sessionID, tool, path, preview string) (bool, error) {
 		Type: eventbus.EvApprovalRequest, SessionID: sessionID, Data: pr.req,
 	})
 
-	dec := <-pr.result
+	var dec decision
+	select {
+	case dec = <-pr.result:
+	case <-ctx.Done():
+		m.mu.Lock()
+		delete(m.pending, id)
+		m.mu.Unlock()
+		m.bus.Emit(eventbus.Event{
+			Type: eventbus.EvApprovalDecided, SessionID: sessionID,
+			Data: eventbus.ApprovalDecidedData{ID: id, Approved: false},
+		})
+		return false, ctx.Err()
+	}
 
 	m.mu.Lock()
 	delete(m.pending, id)
@@ -87,6 +109,34 @@ func (m *Manager) Request(sessionID, tool, path, preview string) (bool, error) {
 		return false, fmt.Errorf("%w: %s %s", ErrDenied, tool, path)
 	}
 	return true, nil
+}
+
+// CancelSession 撤销某会话的全部待审批请求（会话被删除/中断时调用）。
+// 等待方按「未批准」返回 ErrDenied，pending 由等待方自行清理。
+func (m *Manager) CancelSession(sessionID string) {
+	m.mu.Lock()
+	targets := make([]*pendingReq, 0, len(m.pending))
+	for _, pr := range m.pending {
+		if pr.req.SessionID == sessionID {
+			targets = append(targets, pr)
+		}
+	}
+	m.mu.Unlock()
+
+	for _, pr := range targets {
+		select {
+		case pr.result <- decision{approved: false}:
+		default: // 已有决策在队列中，无需重复
+		}
+	}
+}
+
+// ForgetSession 清理会话的「批准并记住」记录（会话删除时调用）。
+// remembered 以 sessionID 为键，不清理会随删除的会话长期累积。
+func (m *Manager) ForgetSession(sessionID string) {
+	m.mu.Lock()
+	delete(m.remembered, sessionID)
+	m.mu.Unlock()
 }
 
 // Decide 用户决策（Wails Service 调用）。

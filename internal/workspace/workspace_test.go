@@ -131,3 +131,39 @@ func TestResolveNonExistPathStillWithin(t *testing.T) {
 		t.Fatalf("Resolve = %q", got)
 	}
 }
+
+// TestResolveSymlinkDirEscapeRejected 目标不存在时，经符号链接目录写新文件也必须被拒绝。
+// 回归：旧实现只在目标已存在时解析符号链接，目标不存在会跳过检查。
+func TestResolveSymlinkDirEscapeRejected(t *testing.T) {
+	m, root := newTestManager(t)
+	outside := t.TempDir()
+	link := filepath.Join(root, "escape")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skip("当前环境无权限创建符号链接，跳过")
+	}
+	for _, p := range []string{"escape/new.txt", "escape/sub/deep.txt"} {
+		if _, err := m.Resolve(p); !errors.Is(err, ErrOutsideWorkspace) {
+			t.Fatalf("Resolve(%q) 应返回 ErrOutsideWorkspace，got %v", p, err)
+		}
+	}
+}
+
+// TestResolveSymlinkInsideAllowed 指向 workspace 内部的符号链接仍可正常解析。
+func TestResolveSymlinkInsideAllowed(t *testing.T) {
+	m, root := newTestManager(t)
+	target := filepath.Join(root, "real")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "alias")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skip("当前环境无权限创建符号链接，跳过")
+	}
+	got, err := m.Resolve("alias/new.txt")
+	if err != nil {
+		t.Fatalf("workspace 内的符号链接应允许: %v", err)
+	}
+	if got != filepath.Join(target, "new.txt") {
+		t.Fatalf("Resolve = %q, want %q", got, filepath.Join(target, "new.txt"))
+	}
+}

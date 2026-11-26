@@ -54,7 +54,7 @@ export function GetProjectAgents(): $CancellablePromise<agentspec$0.Spec[] | nul
 }
 
 /**
- * SaveConfig 保存配置。
+ * SaveConfig 保存配置（含校验：模型字段/ID 唯一/activeModelId 有效性）。
  */
 export function SaveConfig(cfg: config$0.Config): $CancellablePromise<void> {
     return $Call.ByID(895594508, cfg);
@@ -65,4 +65,12 @@ export function SaveConfig(cfg: config$0.Config): $CancellablePromise<void> {
  */
 export function SaveProjectAgent(spec: agentspec$0.Spec): $CancellablePromise<void> {
     return $Call.ByID(191178672, spec);
+}
+
+/**
+ * SetActiveModel 切换当前激活模型。
+ * 前端只需上送模型 ID，避免「读整份配置 → 改一个字段 → 覆盖保存」丢失并发修改。
+ */
+export function SetActiveModel(id: string): $CancellablePromise<void> {
+    return $Call.ByID(2299248964, id);
 }

@@ -5,8 +5,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { ConfigService, TaskService } from '../../bindings/ai-dog-agent/internal/service/index.js'
+import { ConfigService, MCPService, TaskService } from '../../bindings/ai-dog-agent/internal/service/index.js'
 import {
   applyGlass, loadGlass, saveGlass,
   DEFAULT_GLASS_ALPHA, DEFAULT_GLASS_BLUR,
@@ -21,6 +22,8 @@ interface ModelConfig {
   model: string
   priceIn?: number
   priceOut?: number
+  timeoutSeconds?: number
+  disableExtraFields?: boolean
 }
 
 interface SkillConfig {
@@ -34,10 +37,22 @@ interface SkillConfig {
 interface MCPServerConfig {
   id: string
   name: string
+  transport: string   // auto | stdio | http | sse
   command: string
-  args: string   // 逗号分隔，保存时转成数组
-  env: string    // KEY=VALUE，每行一条
+  args: string        // 逗号分隔，保存时转成数组
+  env: string         // KEY=VALUE，每行一条
+  url: string
+  headers: string     // KEY=VALUE，每行一条
   enabled: boolean
+  autoApproveReadOnly: boolean
+}
+
+// usesStdio 决定表单展示哪组连接字段：auto 时有 command 优先，其次看 url。
+function usesStdio(m: MCPServerConfig): boolean {
+  if (m.transport === 'stdio') return true
+  if (m.transport === 'http' || m.transport === 'sse') return false
+  if ((m.command ?? '').trim()) return true
+  return !(m.url ?? '').trim()
 }
 
 interface AgentSpec {
@@ -106,6 +121,8 @@ function SettingsPanel({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => 
   const [error, setError] = useState('')
   const [glassAlpha, setGlassAlpha] = useState(() => loadGlass().alpha)
   const [glassBlur, setGlassBlur] = useState(() => loadGlass().blur)
+  // MCP 连接诊断结果（按 server ID）
+  const [mcpTest, setMcpTest] = useState<Record<string, { loading?: boolean; tools?: string[]; error?: string }>>({})
 
   // 外观设置即时生效并持久化（不参与配置文件的保存流程）
   useEffect(() => {
@@ -130,6 +147,11 @@ function SettingsPanel({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => 
       shellWhitelist: c.shellWhitelist ?? [],
       mcpServers: (c.mcpServers ?? []).map((m: any) => ({
         ...m,
+        transport: m.transport ?? 'auto',
+        command: m.command ?? '',
+        url: m.url ?? '',
+        headers: m.headers ?? '',
+        autoApproveReadOnly: m.autoApproveReadOnly ?? false,
         args: (m.args ?? []).join(', '),
         env: m.env ?? '',
       })),
@@ -187,7 +209,13 @@ function SettingsPanel({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => 
   const saveConfig = async () => {
     setError('')
     try {
-      await ConfigService.SaveConfig(serialize(cfg) as any)
+      // activeModelId 由 SetActiveModel 单独维护：保存前重新读一次当前值，
+      // 避免用打开设置页时的旧快照覆盖 Composer 里刚做的模型切换。
+      const latest = await ConfigService.GetConfig()
+      await ConfigService.SaveConfig(serialize({
+        ...cfg,
+        activeModelId: latest?.activeModelId ?? cfg.activeModelId,
+      }) as any)
       setSaved(true)
       setDirty(false)
     } catch (e) {
@@ -197,13 +225,14 @@ function SettingsPanel({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => 
 
   // 点击模型行立即设为当前（与 Composer 的切换语义一致）；字段编辑仍需保存
   const activateModel = async (id: string) => {
+    const prev = cfg.activeModelId
     setCfg(c => ({ ...c, activeModelId: id }))
     setError('')
     try {
-      const current: any = await ConfigService.GetConfig()
-      current.activeModelId = id
-      await ConfigService.SaveConfig(current)
+      // 只切换激活项，避免整份配置读改写
+      await ConfigService.SetActiveModel(id)
     } catch (e) {
+      setCfg(c => ({ ...c, activeModelId: prev }))
       setError(String(e))
     }
   }
@@ -232,6 +261,28 @@ function SettingsPanel({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => 
       loadAgents()
     } catch (e) {
       setError(String(e))
+    }
+  }
+
+  // MCP 连接诊断：一次性连接并列出工具名（无需先保存配置）
+  const testMCP = async (m: MCPServerConfig) => {
+    setMcpTest(s => ({ ...s, [m.id]: { loading: true } }))
+    try {
+      const names = await MCPService.TestConnection({
+        id: m.id,
+        name: m.name,
+        transport: m.transport || 'auto',
+        command: m.command,
+        args: m.args.split(',').map(s => s.trim()).filter(Boolean),
+        env: m.env,
+        url: m.url,
+        headers: m.headers,
+        enabled: m.enabled,
+        autoApproveReadOnly: m.autoApproveReadOnly,
+      } as any)
+      setMcpTest(s => ({ ...s, [m.id]: { tools: names ?? [] } }))
+    } catch (e: any) {
+      setMcpTest(s => ({ ...s, [m.id]: { error: typeof e === 'string' ? e : e?.message ?? String(e) } }))
     }
   }
 
@@ -297,6 +348,14 @@ function SettingsPanel({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => 
                     <Input type="number" value={m.priceOut}
                       onClick={e => e.stopPropagation()}
                       onChange={e => updateModel(i, { priceOut: Number(e.target.value) })} />
+                    <Label>超时（秒）</Label>
+                    <Input type="number" value={m.timeoutSeconds ?? 0}
+                      placeholder="0 = 默认 300"
+                      onClick={e => e.stopPropagation()}
+                      onChange={e => updateModel(i, { timeoutSeconds: Number(e.target.value) })} />
+                    <Label>发送 agent_id</Label>
+                    <Switch checked={!m.disableExtraFields}
+                      onCheckedChange={v => updateModel(i, { disableExtraFields: !v })} />
                   </div>
                   <div className="row-actions">
                     <Button
@@ -320,7 +379,8 @@ function SettingsPanel({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => 
             <p className="hint">
               配置文件：{dir || '…'}<br />
               点击模型行会立即设为当前模型；其它字段修改需点右下角「保存」。
-              一个 OpenAI 兼容配置即可覆盖 DeepSeek / Qwen / GLM / OpenAI 等；修改模型配置后请新建会话生效。
+              一个 OpenAI 兼容配置即可覆盖 DeepSeek / Qwen / GLM / OpenAI 等；保存后对当前会话下一轮生效。
+              超时 0 表示默认 300s；「发送 agent_id」关闭后请求体不再带 agent_id/user_id（严格端点兼容）。
             </p>
           </>
         )}
@@ -328,7 +388,7 @@ function SettingsPanel({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => 
         {tab === 'skills' && (
           <>
             <h3>Skills（可复用指令包）</h3>
-            <p className="hint">启用的 Skill 会追加到主 Agent 的动态上下文尾部（不破坏提示词缓存前缀）；保存后新建会话生效。</p>
+            <p className="hint">启用的 Skill 会追加到主 Agent 的动态上下文尾部（不破坏提示词缓存前缀）；保存后对当前会话下一轮生效。</p>
             {cfg.skills.length === 0 && <p className="hint">暂无 Skill，点击下方「添加 Skill」。</p>}
             {cfg.skills.map((s, i) => (
               <div key={s.id} className="model-row">
@@ -373,7 +433,9 @@ function SettingsPanel({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => 
           <>
             <h3>MCP Server（外部工具）</h3>
             <p className="hint">
-              支持 stdio 启动方式。当前版本将已启用 Server 注入 Agent 上下文；实际客户端连接（工具调用）在 M6 接入。
+              支持 stdio 与 HTTP/SSE 远程连接。已启用 Server 在新建会话或配置变更后连接，工具以 mcp_&lt;server&gt;_&lt;tool&gt; 暴露给主 Agent；
+              默认每次调用需审批（可「批准并记住」）。「只读工具免审批」仅对服务器声明 readOnlyHint=true 的工具跳过审批，默认关闭——
+              该注解来自服务器，不可完全信任。
             </p>
             {cfg.mcpServers.length === 0 && <p className="hint">暂无 MCP Server，点击下方「添加 MCP Server」。</p>}
             {cfg.mcpServers.map((m, i) => (
@@ -382,20 +444,54 @@ function SettingsPanel({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => 
                   <div className="form-grid">
                     <Label>名称</Label>
                     <Input value={m.name} onChange={e => updateMCP(i, { name: e.target.value })} />
-                    <Label>启动命令</Label>
-                    <Input value={m.command} placeholder="npx / uvx / 可执行文件路径"
-                      onChange={e => updateMCP(i, { command: e.target.value })} />
-                    <Label>参数</Label>
-                    <Input value={m.args} placeholder="-y, @modelcontextprotocol/server-filesystem"
-                      onChange={e => updateMCP(i, { args: e.target.value })} />
-                    <Label>环境变量</Label>
-                    <Textarea rows={2} value={m.env}
-                      placeholder={'ROOT=C:\\project\nDEBUG=0'}
-                      onChange={e => updateMCP(i, { env: e.target.value })} />
+                    <Label>连接方式</Label>
+                    <Select value={m.transport || 'auto'} onValueChange={v => updateMCP(i, { transport: v })}>
+                      <SelectTrigger size="sm" className="w-full"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="auto">自动（有命令走 stdio，否则 HTTP）</SelectItem>
+                        <SelectItem value="stdio">stdio（本地进程）</SelectItem>
+                        <SelectItem value="http">HTTP（Streamable）</SelectItem>
+                        <SelectItem value="sse">SSE（旧版）</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {usesStdio(m) ? (
+                      <>
+                        <Label>启动命令</Label>
+                        <Input value={m.command} placeholder="npx / uvx / 可执行文件路径"
+                          onChange={e => updateMCP(i, { command: e.target.value })} />
+                        <Label>参数</Label>
+                        <Input value={m.args} placeholder="-y, @modelcontextprotocol/server-filesystem"
+                          onChange={e => updateMCP(i, { args: e.target.value })} />
+                        <Label>环境变量</Label>
+                        <Textarea rows={2} value={m.env}
+                          placeholder={'ROOT=C:\\project\nDEBUG=0'}
+                          onChange={e => updateMCP(i, { env: e.target.value })} />
+                      </>
+                    ) : (
+                      <>
+                        <Label>服务地址</Label>
+                        <Input value={m.url} placeholder="https://example.com/mcp"
+                          onChange={e => updateMCP(i, { url: e.target.value })} />
+                        <Label>请求头</Label>
+                        <Textarea rows={2} value={m.headers}
+                          placeholder={'Authorization=Bearer ${MCP_TOKEN}'}
+                          onChange={e => updateMCP(i, { headers: e.target.value })} />
+                      </>
+                    )}
                     <Label>启用</Label>
                     <Switch checked={m.enabled} onCheckedChange={v => updateMCP(i, { enabled: v })} />
+                    <Label>只读工具免审批</Label>
+                    <Switch checked={m.autoApproveReadOnly}
+                      onCheckedChange={v => updateMCP(i, { autoApproveReadOnly: v })} />
                   </div>
                   <div className="row-actions">
+                    <Button
+                      variant="outline"
+                      size="xs"
+                      disabled={mcpTest[m.id]?.loading}
+                      onClick={() => testMCP(m)}
+                      title="启动一次连接并列出工具（不影响已建立的会话连接）"
+                    >{mcpTest[m.id]?.loading ? '连接中…' : '测试连接'}</Button>
                     <Button
                       variant="destructive"
                       size="icon-sm"
@@ -404,6 +500,13 @@ function SettingsPanel({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => 
                       onClick={() => patch({ mcpServers: cfg.mcpServers.filter(x => x.id !== m.id) })}
                     ><Trash2 /></Button>
                   </div>
+                  {mcpTest[m.id] && (
+                    <p className={mcpTest[m.id].error ? 'hint text-destructive' : 'hint'}>
+                      {mcpTest[m.id].loading ? '连接中…'
+                        : mcpTest[m.id].error ? `连接失败：${mcpTest[m.id].error}`
+                          : `已连接，工具：${(mcpTest[m.id].tools ?? []).join(', ') || '（无）'}`}
+                    </p>
+                  )}
                 </div>
                 <div className="meta">{m.enabled ? '已启用' : '未启用'}</div>
               </div>
@@ -411,7 +514,9 @@ function SettingsPanel({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => 
             <div className="row-actions">
               <Button variant="secondary" size="sm" onClick={() => patch({
                 mcpServers: [...cfg.mcpServers, {
-                  id: crypto.randomUUID(), name: '新 MCP Server', command: '', args: '', env: '', enabled: true,
+                  id: crypto.randomUUID(), name: '新 MCP Server', transport: 'auto',
+                  command: '', args: '', env: '', url: '', headers: '',
+                  enabled: true, autoApproveReadOnly: false,
                 }],
               })}><Plus className="size-3.5" /> 添加 MCP Server</Button>
             </div>
@@ -424,7 +529,7 @@ function SettingsPanel({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => 
             <p className="hint">
               目录：{agentDir || '未设置工作区，请先在左侧「项目」选择目录'}<br />
               每个 Agent 对应一个 .json 文件，Schema：agent_id（自动生成固化，唯一不变）/ name / description / system_prompt / model / tools / skills / mcp_servers / max_turns。<br />
-              当前版本把定义注入主 Agent 上下文；按配置分派执行（独立上下文 / skill / MCP 工具集）在后续里程碑接入。保存后新建会话生效。
+              当前版本把定义注入主 Agent 上下文；按配置分派执行（独立上下文 / skill / MCP 工具集）在后续里程碑接入。保存后对当前会话下一轮生效。
             </p>
             {!agentDir && <p className="hint">设置工作区后即可添加项目级 Agent。</p>}
             {agents.map((a, i) => (
@@ -537,8 +642,9 @@ function SettingsPanel({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => 
             <h3>Shell 白名单</h3>
             <p className="hint">
               run_shell 白名单内的命令免审批直接执行；白名单外命令需用户批准。
-              go 仅放行 build/test/vet/fmt/version，git 仅放行 status/diff/log/show/branch，其余子命令一律需审批（不受白名单影响）。
-              保存后新建会话生效。
+              go 仅放行 build/test/vet/fmt/version；git 仅放行 status/diff/log/show 与 branch 的列分支形式（如 branch -a），
+              branch -D/-m、push/commit/reset 等写操作一律需审批（不受白名单影响）。
+              保存后对当前会话下一轮生效。
             </p>
             {cfg.shellWhitelist.length === 0 && <p className="hint">白名单为空：所有 run_shell 命令都需审批。</p>}
             <div className="whitelist-list">

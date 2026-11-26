@@ -84,14 +84,44 @@ func (m *Manager) Resolve(rel string) (string, error) {
 		return "", fmt.Errorf("%w: %s", ErrOutsideWorkspace, rel)
 	}
 
-	// 符号链接逃逸检查：目标已存在时解析真实路径再校验。
+	// 符号链接逃逸检查：
+	//   - 目标已存在：解析真实路径再校验；
+	//   - 目标不存在（如写入新文件）：解析「最近的已存在祖先」再校验。
+	//     否则「符号链接目录 + 新文件名」会绕过检查，写到 workspace 之外。
 	if resolved, err := filepath.EvalSymlinks(p); err == nil {
 		if !within(root, resolved) {
 			return "", fmt.Errorf("%w（符号链接逃逸）: %s", ErrOutsideWorkspace, rel)
 		}
-		p = resolved
+		return resolved, nil
 	}
-	return p, nil
+	ancestor, rest, err := resolveExistingAncestor(p)
+	if err != nil {
+		return "", err
+	}
+	if !within(root, ancestor) {
+		return "", fmt.Errorf("%w（符号链接逃逸）: %s", ErrOutsideWorkspace, rel)
+	}
+	return filepath.Join(ancestor, rest), nil
+}
+
+// resolveExistingAncestor 返回 p 最近的已存在祖先的真实路径，以及 p 相对该祖先的剩余路径。
+// 剩余路径不含 ".."（p 已 Clean 且通过 within 校验），拼接结果仍位于真实祖先之下。
+func resolveExistingAncestor(p string) (ancestor, rest string, err error) {
+	cur := p
+	for {
+		if real, e := filepath.EvalSymlinks(cur); e == nil {
+			r, e := filepath.Rel(cur, p)
+			if e != nil {
+				return "", "", fmt.Errorf("解析路径失败: %w", e)
+			}
+			return real, r, nil
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return "", "", fmt.Errorf("无法解析路径的已有祖先: %s", p)
+		}
+		cur = parent
+	}
 }
 
 // within 判断 p 是否位于 root 内（含相等）。

@@ -2,6 +2,8 @@ package tools
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -34,7 +36,7 @@ func GoToolset(ws *workspace.Manager) []tool.BaseTool {
 				argv = append(argv, "-v")
 			}
 			argv = append(argv, target)
-			out, code, rerr := runCommand(ws, "go", argv)
+			out, code, rerr := runCommand(ctx, ws, "go", argv)
 			if rerr != nil {
 				return "", rerr // 启动失败/超时才是工具错误
 			}
@@ -54,7 +56,7 @@ func GoToolset(ws *workspace.Manager) []tool.BaseTool {
 			if err != nil {
 				return "", err
 			}
-			out, code, rerr := runCommand(ws, "go", []string{"vet", target})
+			out, code, rerr := runCommand(ctx, ws, "go", []string{"vet", target})
 			if rerr != nil {
 				return "", rerr
 			}
@@ -74,7 +76,14 @@ func GoToolset(ws *workspace.Manager) []tool.BaseTool {
 			if err != nil {
 				return "", err
 			}
-			out, code, rerr := runCommand(ws, "go", []string{"build", target})
+			// 输出到临时目录：go build 默认把 main 包的可执行文件写到 cwd
+			//（即 workspace 根），会在用户项目里留下未跟踪产物。
+			outDir, terr := os.MkdirTemp("", "aidog-gobuild-")
+			if terr != nil {
+				return "", fmt.Errorf("创建临时输出目录失败: %w", terr)
+			}
+			defer os.RemoveAll(outDir)
+			out, code, rerr := runCommand(ctx, ws, "go", []string{"build", "-o", outDir, target})
 			if rerr != nil {
 				return "", rerr
 			}

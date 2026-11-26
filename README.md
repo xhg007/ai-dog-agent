@@ -20,12 +20,34 @@
 
 ## 开发
 
-```bash
-wails3 dev    # 开发调试（最小参数形式）
-wails3 build  # 生产构建
+DuckDB 使用**动态库模式**（`-tags=duckdb_use_lib`），以便加载 vss 等扩展；
+静态预构建库下 `INSTALL vss` 会原生崩溃。
+
+`libs/` 目录（不入仓，可从发布包或 `go-duckdb-demo/libs` 复制）：
+
+- `libs/duckdb-shared-libs-windows-amd64/`：`duckdb.dll` / `duckdb.lib` / `duckdb.h`
+- `libs/duckdb-shared-libs-linux-amd64/`：`libduckdb.so` + 头文件
+- `libs/duckdb-shared-libs-osx-amd64/`：`libduckdb.dylib` + 头文件
+
+开发与构建：
+
+```powershell
+.\run-dev.ps1        # Windows 开发
+.\build-windows.ps1  # Windows 构建
 ```
 
-Go 侧测试：
+```bash
+./run-dev.sh         # Linux/macOS 开发
+./build.sh           # Linux/macOS 构建
+```
+
+`wails3 build` 的 Taskfile 已按平台设置 `CGO_CFLAGS` / `CGO_LDFLAGS` / `EXTRA_TAGS`，
+并把 DuckDB 共享库复制到 `bin/`（macOS 同时复制进 `.app/Contents/MacOS`）。
+运行可执行文件时共享库必须在同目录（或启动前已在 PATH / `LD_LIBRARY_PATH` /
+`DYLD_LIBRARY_PATH` 中）。
+
+Go 侧测试（默认静态 2.0.1 可用；动态库模式需设置同样的 CGO 环境并加
+`-tags=duckdb_use_lib`）：
 
 ```bash
 go test ./internal/...

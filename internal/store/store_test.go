@@ -1,7 +1,10 @@
 package store
 
 import (
+	"encoding/json"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -39,7 +42,7 @@ func TestTaskLifecycle(t *testing.T) {
 		t.Fatalf("UpdateTaskStatus: %v", err)
 	}
 	tasks, _ = s.ListTasks(10)
-	if tasks[0].Status != StatusFailed || tasks[0].Error != "go test 失败" || tasks[0].FinishedAt.IsZero() {
+	if tasks[0].Status != StatusFailed || tasks[0].Error != "go test 失败" || tasks[0].FinishedAt == nil {
 		t.Fatalf("终态未正确落库: %+v", tasks[0])
 	}
 }
@@ -141,5 +144,56 @@ func TestAsyncWriterDrain(t *testing.T) {
 	}
 	if len(evs) != 5 {
 		t.Fatalf("排空后应有 5 条事件，got %d", len(evs))
+	}
+}
+
+// TestTaskJSONFinishedAt 运行中任务不输出 finishedAt，终态任务输出具体时间。
+func TestTaskJSONFinishedAt(t *testing.T) {
+	b, err := json.Marshal(Task{ID: "t1", Status: StatusRunning})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "finishedAt") {
+		t.Fatalf("运行中任务不应输出 finishedAt: %s", b)
+	}
+	now := time.Now()
+	b, err = json.Marshal(Task{ID: "t1", Status: StatusCompleted, FinishedAt: &now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		FinishedAt *string `json:"finishedAt"`
+	}
+	if err := json.Unmarshal(b, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.FinishedAt == nil || *payload.FinishedAt == "0001-01-01T00:00:00Z" {
+		t.Fatalf("终态任务应输出有效 finishedAt: %s", b)
+	}
+}
+// TestConcurrentReadWrite 并发读写同一 DuckDB 文件不报错（连接池 + DuckDB 自身并发控制）。
+func TestConcurrentReadWrite(t *testing.T) {
+	s := openTestStore(t)
+	if err := s.CreateTask(Task{ID: "base", SessionID: "s", Title: "t", Status: StatusRunning}); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 64)
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := s.ListTasks(10); err != nil {
+				errs <- err
+			}
+			if err := s.AppendTaskEvent("base", "tool_call", `{"i":1}`); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("并发读写失败: %v", err)
 	}
 }

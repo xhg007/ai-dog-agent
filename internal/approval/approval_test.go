@@ -1,6 +1,7 @@
 package approval
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -186,5 +187,78 @@ func TestRequestEmitsEvent(t *testing.T) {
 	}
 	if data.Tool != "write_file" || data.Path != "a.txt" || data.Preview != "+ new" {
 		t.Fatalf("事件载荷不符: %+v", data)
+	}
+}
+
+// TestRequestContextCancelled ctx 取消后 RequestContext 立即返回，且不残留待审批。
+func TestRequestContextCancelled(t *testing.T) {
+	m := newTestManager()
+	ctx, cancel := context.WithCancel(context.Background())
+	errc := make(chan error, 1)
+	go func() {
+		_, err := m.RequestContext(ctx, "s1", "write_file", "a.txt", "+ x")
+		errc <- err
+	}()
+	// 等 pending 出现再取消，确保走的是「等待中被取消」路径
+	deadline := time.Now().Add(2 * time.Second)
+	for len(m.pendingIDs()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if len(m.pendingIDs()) != 1 {
+		t.Fatal("应有 1 个待审批")
+	}
+	cancel()
+
+	select {
+	case err := <-errc:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("取消后应返回 context.Canceled，got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ctx 取消后 RequestContext 未返回（永久阻塞）")
+	}
+	if n := len(m.pendingIDs()); n != 0 {
+		t.Fatalf("取消后不应残留待审批，got %d", n)
+	}
+}
+
+// TestCancelSession 撤销某会话的待审批，其他会话不受影响。
+func TestCancelSession(t *testing.T) {
+	m := newTestManager()
+	errc := make(chan error, 2)
+	for _, sid := range []string{"s1", "s2"} {
+		sid := sid
+		go func() {
+			_, err := m.Request(sid, "write_file", sid+".txt", "+ x")
+			errc <- err
+		}()
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for len(m.pendingIDs()) < 2 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if len(m.pendingIDs()) != 2 {
+		t.Fatalf("应有两个会话的待审批，got %d", len(m.pendingIDs()))
+	}
+
+	m.CancelSession("s1")
+	select {
+	case err := <-errc:
+		if !errors.Is(err, ErrDenied) {
+			t.Fatalf("被撤销的会话应按拒绝返回 ErrDenied，got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("CancelSession 后等待方未返回")
+	}
+
+	pending := m.ListPending()
+	if len(pending) != 1 || pending[0].SessionID != "s2" {
+		t.Fatalf("s2 的审批应保留，got %+v", pending)
+	}
+	if err := m.Decide(pending[0].ID, true, false); err != nil {
+		t.Fatalf("Decide 失败: %v", err)
+	}
+	if err := <-errc; err != nil {
+		t.Fatalf("s2 批准后应返回 nil，got %v", err)
 	}
 }

@@ -191,3 +191,61 @@ func findTool(t *testing.T, set []tool.BaseTool, name string) tool.BaseTool {
 	t.Fatalf("工具集缺少 %s", name)
 	return nil
 }
+
+// TestWriteFileWithBackup_AbsolutePathKeepsMirror 绝对路径入参时，备份仍落在
+// backupDir 下的 workspace 相对镜像路径，而不是畸形拼接路径。
+func TestWriteFileWithBackup_AbsolutePathKeepsMirror(t *testing.T) {
+	ws, root := writeSetupWS(t)
+	backup := t.TempDir()
+	target := filepath.Join(root, "pkg", "a.txt")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WriteFileWithBackup(ws, target, "new", backup); err != nil {
+		t.Fatalf("绝对路径写入失败: %v", err)
+	}
+	b, err := os.ReadFile(filepath.Join(backup, "pkg", "a.txt"))
+	if err != nil {
+		t.Fatalf("备份未落在相对镜像路径: %v", err)
+	}
+	if string(b) != "old" {
+		t.Fatalf("备份内容不符: %q", b)
+	}
+}
+
+// TestRestoreFromBackup 从备份恢复文件内容。
+func TestRestoreFromBackup(t *testing.T) {
+	ws, root := writeSetupWS(t)
+	backup := t.TempDir()
+	target := filepath.Join(root, "a.txt")
+	if err := os.WriteFile(target, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WriteFileWithBackup(ws, "a.txt", "new", backup); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("broken"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := RestoreFromBackup(ws, backup, "a.txt"); err != nil {
+		t.Fatalf("回滚失败: %v", err)
+	}
+	data, _ := os.ReadFile(target)
+	if string(data) != "old" {
+		t.Fatalf("回滚后内容应为 old，got %q", data)
+	}
+}
+
+// TestRestoreFromBackup_RejectsEscape 越界路径不得读取备份目录之外的文件。
+func TestRestoreFromBackup_RejectsEscape(t *testing.T) {
+	ws, _ := writeSetupWS(t)
+	backup := t.TempDir()
+	for _, p := range []string{"../evil.txt", `..\evil.txt`, filepath.Join(t.TempDir(), "evil.txt")} {
+		if err := RestoreFromBackup(ws, backup, p); !errors.Is(err, workspace.ErrOutsideWorkspace) {
+			t.Fatalf("RestoreFromBackup(%q) 应返回 ErrOutsideWorkspace，got %v", p, err)
+		}
+	}
+}

@@ -1,6 +1,8 @@
 package service
 
 import (
+	"fmt"
+
 	"ai-dog-agent/internal/agentspec"
 	"ai-dog-agent/internal/config"
 	"ai-dog-agent/internal/workspace"
@@ -27,8 +29,28 @@ func (c *ConfigService) GetConfig() config.Config {
 	return cfg
 }
 
-// SaveConfig 保存配置。
+// SaveConfig 保存配置（含校验：模型字段/ID 唯一/activeModelId 有效性）。
 func (c *ConfigService) SaveConfig(cfg config.Config) error {
+	return c.mgr.Save(cfg)
+}
+
+// SetActiveModel 切换当前激活模型。
+// 前端只需上送模型 ID，避免「读整份配置 → 改一个字段 → 覆盖保存」丢失并发修改。
+func (c *ConfigService) SetActiveModel(id string) error {
+	cfg := c.mgr.Get()
+	if id != "" {
+		found := false
+		for _, m := range cfg.Models {
+			if m.ID == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("模型不存在: %s", id)
+		}
+	}
+	cfg.ActiveModelID = id
 	return c.mgr.Save(cfg)
 }
 

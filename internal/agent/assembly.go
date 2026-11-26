@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
@@ -86,13 +87,18 @@ func BuildProjectContext(ws *workspace.Manager) (string, error) {
 }
 
 // readExcerpt 读取文件前 limit 字节（不存在返回空串）。
+// 按 UTF-8 边界截断，避免把中文等多字节字符切成半个。
 func readExcerpt(root, name string, limit int) string {
 	data, err := os.ReadFile(filepath.Join(root, name))
 	if err != nil {
 		return ""
 	}
 	if len(data) > limit {
-		data = data[:limit]
+		cut := limit
+		for cut > 0 && !utf8.RuneStart(data[cut]) {
+			cut--
+		}
+		data = data[:cut]
 	}
 	return string(data)
 }
@@ -127,10 +133,12 @@ func BuildExplorer(ctx context.Context, ws *workspace.Manager, cm model.BaseChat
 	})
 }
 
-// OrchestratorTools 主 Agent 工具：分派 explorer 子 Agent + 写操作（审批门）+ 执行类工具（M4）。
+// OrchestratorTools 主 Agent 工具：分派 explorer 子 Agent + 写操作（审批门）+ 执行类工具（M4）
+// + 外部 MCP 工具（extraTools）。
 // whitelist 为 Shell 白名单（run_shell 白名单内免审批；go_test/go_vet/go_build 免审批）。
 func OrchestratorTools(ctx context.Context, ws *workspace.Manager, cm model.BaseChatModel,
-	appr *approval.Manager, backupRoot, sessionID string, whitelist []string) ([]tool.BaseTool, error) {
+	appr *approval.Manager, backupRoot, sessionID string, whitelist []string,
+	extraTools []tool.BaseTool) ([]tool.BaseTool, error) {
 	explorer, err := BuildExplorer(ctx, ws, cm)
 	if err != nil {
 		return nil, fmt.Errorf("构建 explorer 子 Agent 失败: %w", err)
@@ -147,19 +155,23 @@ func OrchestratorTools(ctx context.Context, ws *workspace.Manager, cm model.Base
 	shellTool, err := utils.InferTool("run_shell",
 		"在项目工作区内执行 Shell 命令。白名单内命令免审批直接执行；白名单外命令需用户审批。命令不经 shell 解释（无注入面）。",
 		func(ctx context.Context, args tools.ShellArgs) (string, error) {
-			return tools.ShellRun(ws, whitelist, appr, sessionID, args.Command)
+			return tools.ShellRun(ctx, ws, whitelist, appr, sessionID, args.Command)
 		})
 	if err != nil {
 		return nil, fmt.Errorf("注册 run_shell 工具失败: %w", err)
 	}
 	toolList = append(toolList, shellTool)
+	// 外部 MCP 工具（已包装 + 审批门）；连接失败时调用方只得到空列表
+	toolList = append(toolList, extraTools...)
 	return toolList, nil
 }
 
-// BuildOrchestrator 构建主 Agent（含 explorer 分派工具 + 写操作审批工具 + 执行工具）。
+// BuildOrchestrator 构建主 Agent（含 explorer 分派工具 + 写操作审批工具 + 执行工具 + MCP 工具）。
+// extras 为追加到稳定提示词尾部的动态上下文；extraTools 为外部 MCP 工具。
 func BuildOrchestrator(ctx context.Context, ws *workspace.Manager, cm model.BaseChatModel,
-	appr *approval.Manager, backupRoot, sessionID string, whitelist []string, extras ...string) (adk.Agent, error) {
-	orchTools, err := OrchestratorTools(ctx, ws, cm, appr, backupRoot, sessionID, whitelist)
+	appr *approval.Manager, backupRoot, sessionID string, whitelist []string,
+	extras string, extraTools []tool.BaseTool) (adk.Agent, error) {
+	orchTools, err := OrchestratorTools(ctx, ws, cm, appr, backupRoot, sessionID, whitelist, extraTools)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +180,7 @@ func BuildOrchestrator(ctx context.Context, ws *workspace.Manager, cm model.Base
 		instruction += dyn
 	}
 	// 动态尾部：Skills / MCP / 项目自定义 Agent 配置（稳定前缀之后追加）
-	instruction += strings.Join(extras, "")
+	instruction += extras
 	return adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:        "orchestrator",
 		Description: "ai-dog-agent 主 Agent，负责理解意图、制定计划、编排子 Agent",
@@ -182,15 +194,22 @@ func BuildOrchestrator(ctx context.Context, ws *workspace.Manager, cm model.Base
 	})
 }
 
-// newPlainOrchestrator 未设置 workspace 时的纯对话主 Agent。
-func newPlainOrchestrator(ctx context.Context, cm model.BaseChatModel, extras ...string) (adk.Agent, error) {
-	return adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
+// newPlainOrchestrator 未设置 workspace 时的纯对话主 Agent（仍可携带 MCP 工具）。
+func newPlainOrchestrator(ctx context.Context, cm model.BaseChatModel,
+	extras string, extraTools []tool.BaseTool) (adk.Agent, error) {
+	cfg := &adk.ChatModelAgentConfig{
 		Name:             "orchestrator",
 		Description:      "ai-dog-agent 主 Agent",
-		Instruction:      OrchestratorInstruction + strings.Join(extras, ""),
+		Instruction:      OrchestratorInstruction + extras,
 		Model:            cm,
 		ModelRetryConfig: retryConfig(),
-	})
+	}
+	if len(extraTools) > 0 {
+		cfg.ToolsConfig = adk.ToolsConfig{
+			ToolsNodeConfig: compose.ToolsNodeConfig{Tools: extraTools},
+		}
+	}
+	return adk.NewChatModelAgent(ctx, cfg)
 }
 
 // retryConfig 模型调用限流重试（参考 DeepSeek 限流：429 并发超限，

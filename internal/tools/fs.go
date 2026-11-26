@@ -4,12 +4,15 @@
 package tools
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"ai-dog-agent/internal/workspace"
 )
@@ -21,13 +24,14 @@ var ignoreDirs = map[string]bool{
 }
 
 const (
-	maxReadSize  = 1 << 20 // 1MB：单次读取内容上限
-	maxReadLines = 5000    // 单次读取行数上限
+	maxReadLines    = 5000    // 单次读取行数上限
+	binarySniffSize = 8192    // 二进制判定取样字节数
+	maxLineSize     = 1 << 20 // 单行上限（超长行报错，避免 Scanner 无限缓冲）
 )
 
 // FileEntry 文件条目。
 type FileEntry struct {
-	Path  string `json:"path"`  // 相对 workspace 的路径
+	Path  string `json:"path"` // 相对 workspace 的路径
 	IsDir bool   `json:"isDir"`
 	Size  int64  `json:"size"`
 }
@@ -41,35 +45,58 @@ type SearchHit struct {
 
 // ReadFile 读取 workspace 内文本文件，返回带行号内容。
 // offset 从 1 开始的起始行（0 表示从头）；limit 行数（0 表示默认 2000）。
+// 按行流式读取：大文件也能用 offset/limit 分页，不会整文件载入内存（FR-2.1）。
 func ReadFile(ws *workspace.Manager, path string, offset, limit int) (string, error) {
 	abs, err := ws.Resolve(path)
 	if err != nil {
 		return "", err
 	}
-	data, err := os.ReadFile(abs)
+	f, err := os.Open(abs)
 	if err != nil {
 		return "", fmt.Errorf("读取失败: %w", err)
 	}
-	if len(data) > maxReadSize {
-		return "", fmt.Errorf("文件过大(%d 字节)，请用 offset/limit 分页读取", len(data))
+	defer f.Close()
+
+	// 二进制检测只看文件头，避免把大文件整个读进内存
+	head := make([]byte, binarySniffSize)
+	n, err := io.ReadFull(f, head)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return "", fmt.Errorf("读取失败: %w", err)
 	}
-	if isBinary(data) {
+	if isBinary(head[:n]) {
 		return "", fmt.Errorf("疑似二进制文件，拒绝读取: %s", path)
 	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return "", fmt.Errorf("读取失败: %w", err)
+	}
+
 	if limit <= 0 {
 		limit = 2000
 	}
 	if limit > maxReadLines {
 		limit = maxReadLines
 	}
-	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
 	start := offset
 	if start <= 0 {
 		start = 1
 	}
+
 	var sb strings.Builder
-	for i := start; i <= len(lines) && i < start+limit; i++ {
-		fmt.Fprintf(&sb, "%d: %s\n", i, lines[i-1])
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), maxLineSize)
+	lineNo := 0
+	for sc.Scan() {
+		lineNo++
+		if lineNo < start {
+			continue
+		}
+		if lineNo >= start+limit {
+			break
+		}
+		fmt.Fprintf(&sb, "%d: %s\n", lineNo, sc.Text())
+	}
+	if err := sc.Err(); err != nil {
+		return "", fmt.Errorf("读取失败: %w", err)
 	}
 	return sb.String(), nil
 }
@@ -77,8 +104,8 @@ func ReadFile(ws *workspace.Manager, path string, offset, limit int) (string, er
 // isBinary 通过 NUL 字节判断是否二进制。
 func isBinary(data []byte) bool {
 	n := len(data)
-	if n > 8192 {
-		n = 8192
+	if n > binarySniffSize {
+		n = binarySniffSize
 	}
 	for _, b := range data[:n] {
 		if b == 0 {
@@ -135,7 +162,13 @@ func ListFiles(ws *workspace.Manager, dir string, recursive bool, maxEntries int
 			if d.Name() == ".git" || ignoreDirs[d.Name()] && d.IsDir() {
 				continue
 			}
-			e := FileEntry{Path: d.Name(), IsDir: d.IsDir()}
+			// Path 始终是相对 workspace 根的路径（与递归分支一致），
+			// 否则模型拿到的 "fs.go" 无法再喂给 read_file。
+			rel, rerr := filepath.Rel(root, filepath.Join(abs, d.Name()))
+			if rerr != nil {
+				rel = d.Name()
+			}
+			e := FileEntry{Path: rel, IsDir: d.IsDir()}
 			if !d.IsDir() {
 				if info, err := d.Info(); err == nil {
 					e.Size = info.Size()
@@ -241,5 +274,17 @@ func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	return truncateUTF8(s, n) + "…"
+}
+
+// truncateUTF8 按 UTF-8 边界截断到 max 字节以内，避免把多字节字符切一半。
+func truncateUTF8(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	cut := max
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }

@@ -62,8 +62,9 @@ func (f *FallbackModel) tryChain(ctx context.Context, invoke func(cm model.ChatM
 			return nil
 		}
 		lastErr = err
-		// 仅瞬态错误且还有备用模型时切换
-		if !IsTransientError(err) || i == len(f.chain)-1 {
+		// 用户主动取消（ctx 已结束）不切换：否则中断会被当成瞬态故障，
+		// 白白再打一次注定失败的备用模型，并误报 model_fallback 事件。
+		if ctx.Err() != nil || !IsTransientError(err) || i == len(f.chain)-1 {
 			return err
 		}
 		next := f.chain[i+1]

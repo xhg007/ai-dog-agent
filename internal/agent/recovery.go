@@ -74,6 +74,10 @@ func (s *ChatService) RecoverTask(taskID string) error {
 		s.mu.Unlock()
 		return errors.New("会话正在执行中，无法恢复")
 	}
+	if sess.agent != nil && s.configChanged(sess) {
+		sess.agent = nil
+		sess.runner = nil
+	}
 	if sess.agent == nil {
 		if err := s.initAgentLocked(sess); err != nil {
 			s.mu.Unlock()
@@ -88,7 +92,8 @@ func (s *ChatService) RecoverTask(taskID string) error {
 	sess.messages = msgs
 	sess.running = true
 	sess.lastActive = time.Now()
-	s.persistLocked(sess)
+	// 历史已被重建：整体替换消息日志（增量追加不适用）
+	s.persistReplaceLocked(sess)
 	s.mu.Unlock()
 
 	// 新任务记录：恢复轮次也走完整任务生命周期
@@ -102,7 +107,7 @@ func (s *ChatService) RecoverTask(taskID string) error {
 	}
 
 	s.bus.Emit(eventbus.Event{Type: eventbus.EvChatStarted, SessionID: sessionID,
-		Data: eventbus.ChatStartedData{AgentID: sess.agentID}})
+		Data: eventbus.ChatStartedData{AgentID: sess.agentID, Model: sess.modelName}})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s.mu.Lock()

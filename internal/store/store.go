@@ -20,8 +20,8 @@ type Task struct {
 	Status    string `json:"status"` // StatusRunning/StatusCompleted/StatusFailed/StatusInterrupted
 	Error     string `json:"error,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
-	// FinishedAt 终态时间（运行中为零值；扫描侧用 sql.NullTime）。
-	FinishedAt time.Time `json:"finishedAt,omitempty"`
+	// FinishedAt 终态时间；运行中为 nil（JSON 省略，避免前端看到零值时间）。
+	FinishedAt *time.Time `json:"finishedAt,omitempty"`
 }
 
 // TaskEvent 任务事件流记录（task_events 表，FR-5.1 事件落库）。

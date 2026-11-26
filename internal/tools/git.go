@@ -10,7 +10,37 @@ import (
 
 // gitReadOnlySubcommands 允许的 git 只读子命令（安全白名单）。
 var gitReadOnlySubcommands = map[string]bool{
-	"status": true, "diff": true, "log": true, "show": true, "branch": true,
+	"status": true, "diff": true, "log": true, "show": true,
+}
+
+// gitBranchListFlags 放行的 git branch 查询选项（仅列出分支，不创建/删除/改名）。
+var gitBranchListFlags = map[string]bool{
+	"-a": true, "-r": true, "-v": true, "-vv": true,
+	"--all": true, "--remotes": true, "--list": true, "--show-current": true,
+	"--no-color": true,
+}
+
+// gitReadOnly 判定 git 子命令（含选项）是否只读。
+//   - status/diff/log/show：拒绝会写文件的 --output 选项；
+//   - branch：只放行列分支形式，-d/-D/-m/-M/-f/-c 等写操作与位置参数一律拒绝。
+func gitReadOnly(sub string, rest []string) bool {
+	if sub == "branch" {
+		for _, a := range rest {
+			if !gitBranchListFlags[a] {
+				return false
+			}
+		}
+		return true
+	}
+	if !gitReadOnlySubcommands[sub] {
+		return false
+	}
+	for _, a := range rest {
+		if a == "--output" || strings.HasPrefix(a, "--output=") {
+			return false
+		}
+	}
+	return true
 }
 
 // GitRun 在 workspace 内执行只读 git 命令（不经 shell，无注入面）。
@@ -23,8 +53,8 @@ func GitRun(ws *workspace.Manager, args []string) (string, error) {
 		return "", fmt.Errorf("缺少 git 子命令")
 	}
 	sub := args[0]
-	if !gitReadOnlySubcommands[sub] {
-		return "", fmt.Errorf("git %q 不在只读白名单内（允许: status/diff/log/show/branch）", sub)
+	if !gitReadOnly(sub, args[1:]) {
+		return "", fmt.Errorf("git %q 不在只读白名单内（允许: status/diff/log/show 与 branch 的列分支形式）", sub)
 	}
 	cmd := exec.Command("git", args...)
 	cmd.Dir = ws.Root()

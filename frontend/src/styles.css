@@ -288,6 +288,24 @@ body {
 
 .usage-inline { font-size: 11px; color: var(--text-faint); font-family: var(--font-mono); }
 
+/* 会话头部：当前主模型名（chat_started 事件上报） */
+.thread-header-model {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 220px;
+}
+
+/* 工具卡片：调用已开始、结果未回 */
+.step-state {
+  font-size: 10px;
+  color: var(--text-faint);
+  padding: 0 4px;
+}
+.step-card.running .step-icon { opacity: 0.65; }
+.step-card.running .step-name { color: var(--text-faint); }
+
 .chip {
   display: inline-flex; align-items: center; gap: 5px;
   background: var(--bg-elevated);
@@ -870,6 +888,23 @@ body.resizing {
   font-size: 11px;
   color: var(--yellow);
   word-break: break-all;
+}
+
+/* 任务事件流（按需展开，纯文本展示 task_events 记录） */
+.task-events {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid #1c1c1c;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 220px;
+  overflow: auto;
 }
 
 /* ===== M5：用量报表 ===== */
