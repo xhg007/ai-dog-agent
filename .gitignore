@@ -13,7 +13,7 @@ build/android/gen/
 .tokensave
 .aidog
 .idea
-bin
+/bin
 m3-verify
 *.log
 *.exe
@@ -24,3 +24,7 @@ m3-verify
 # DuckDB 动态库/头文件（59MB，构建时本地放置，不入仓）
 /libs/
 /vendor
+/.codebuddy
+/.reasonix
+/.aidog
+/.tokensave
