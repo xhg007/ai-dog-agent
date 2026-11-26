@@ -128,6 +128,7 @@ func (s *DuckDBStore) migrate() error {
 			id BIGINT PRIMARY KEY DEFAULT nextval('seq_token_usage'),
 			task_id VARCHAR NOT NULL,
 			model VARCHAR NOT NULL,
+			model_id VARCHAR NOT NULL DEFAULT '',
 			input_tokens BIGINT NOT NULL,
 			output_tokens BIGINT NOT NULL,
 			cost_in DOUBLE NOT NULL DEFAULT 0,
@@ -153,7 +154,27 @@ func (s *DuckDBStore) migrate() error {
 			return fmt.Errorf("建表失败: %w (sql=%s)", err, q)
 		}
 	}
+	// 旧库迁移：token_usage 增加 model_id（M6 work agent 按实际模型对账）。
+	if err := ensureColumn(ctx, conn, "token_usage", "model_id",
+		`ALTER TABLE token_usage ADD COLUMN model_id VARCHAR NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("迁移 token_usage.model_id 失败: %w", err)
+	}
 	return nil
+}
+
+// ensureColumn 在列不存在时执行 ddl（DuckDB 不支持 ADD COLUMN IF NOT EXISTS）。
+func ensureColumn(ctx context.Context, conn *sql.Conn, table, column, ddl string) error {
+	var n int
+	if err := conn.QueryRowContext(ctx,
+		`SELECT count(*) FROM information_schema.columns WHERE table_name = ? AND column_name = ?`,
+		table, column).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	_, err := conn.ExecContext(ctx, ddl)
+	return err
 }
 
 // CreateTask 写入新任务。
@@ -224,9 +245,9 @@ func (s *DuckDBStore) AppendTokenUsage(u TokenUsage) error {
 	defer conn.Close()
 
 	_, err = conn.ExecContext(ctx,
-		`INSERT INTO token_usage (task_id, model, input_tokens, output_tokens, cost_in, cost_out, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		u.TaskID, u.Model, u.InputTokens, u.OutputTokens, u.CostIn, u.CostOut, created)
+		`INSERT INTO token_usage (task_id, model, model_id, input_tokens, output_tokens, cost_in, cost_out, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		u.TaskID, u.Model, u.ModelID, u.InputTokens, u.OutputTokens, u.CostIn, u.CostOut, created)
 	return err
 }
 

@@ -40,7 +40,7 @@ func TestAgentIDBodyField(t *testing.T) {
 	mc := config.ModelConfig{
 		ID: "t1", Name: "local", BaseURL: srv.URL, APIKey: "sk-test", Model: "test-model",
 	}
-	cm, err := BuildModel(context.Background(), mc, "agent-1234")
+	cm, err := BuildModel(context.Background(), mc, "agent-1234", "agent-1234")
 	if err != nil {
 		t.Fatalf("BuildModel 失败: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestAgentIDEmptyNoField(t *testing.T) {
 	defer srv.Close()
 
 	mc := config.ModelConfig{ID: "t2", Name: "local", BaseURL: srv.URL, APIKey: "sk-test", Model: "test-model"}
-	cm, err := BuildModel(context.Background(), mc, "")
+	cm, err := BuildModel(context.Background(), mc, "", "")
 	if err != nil {
 		t.Fatalf("BuildModel 失败: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestDeepSeekLive(t *testing.T) {
 	mc := config.ModelConfig{
 		ID: "live", Name: "DeepSeek", BaseURL: baseURL, APIKey: key, Model: modelID,
 	}
-	cm, err := BuildModel(context.Background(), mc, "llm-live-test-agent")
+	cm, err := BuildModel(context.Background(), mc, "llm-live-test-agent", "llm-live-test-agent")
 	if err != nil {
 		t.Fatalf("BuildModel 失败: %v", err)
 	}
@@ -155,28 +155,63 @@ func TestModelTimeout(t *testing.T) {
 	}
 }
 
-// TestExtraFields agent_id 注入受 agentID 与 DisableExtraFields 双开关控制。
+// TestExtraFields agent_id/user_id 注入受 agentID 与 DisableExtraFields 双开关控制。
 func TestExtraFields(t *testing.T) {
-	f := extraFields(config.ModelConfig{}, "a1")
+	f := extraFields(config.ModelConfig{}, "a1", "")
 	if f[BodyAgentIDField] != "a1" || f[BodyUserIDField] != "a1" {
-		t.Fatalf("默认应注入 agent_id/user_id: %v", f)
+		t.Fatalf("userID 为空时应回退 agentID: %v", f)
 	}
-	if f := extraFields(config.ModelConfig{DisableExtraFields: true}, "a1"); len(f) != 0 {
+	f = extraFields(config.ModelConfig{}, "a1", "u1")
+	if f[BodyAgentIDField] != "a1" || f[BodyUserIDField] != "u1" {
+		t.Fatalf("agent_id 与 user_id 应分别注入: %v", f)
+	}
+	if f := extraFields(config.ModelConfig{DisableExtraFields: true}, "a1", "u1"); len(f) != 0 {
 		t.Fatalf("关闭开关后不应注入: %v", f)
 	}
-	if f := extraFields(config.ModelConfig{}, ""); len(f) != 0 {
+	if f := extraFields(config.ModelConfig{}, "", "u1"); len(f) != 0 {
 		t.Fatalf("agentID 为空时不应注入: %v", f)
 	}
 }
 
-// TestDisableExtraFieldsNoBodyField 关闭开关后真实请求体不含 agent_id。
-func TestDisableExtraFieldsNoBodyField(t *testing.T) {
-	var hasField bool
+// TestAgentAndUserIDBodyFields 验证 agent_id 与 user_id 可分别注入。
+func TestAgentAndUserIDBodyFields(t *testing.T) {
+	var gotAgent, gotUser string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		var payload map[string]any
 		if err := json.Unmarshal(body, &payload); err == nil {
-			_, hasField = payload[BodyAgentIDField]
+			gotAgent, _ = payload[BodyAgentIDField].(string)
+			gotUser, _ = payload[BodyUserIDField].(string)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"1","object":"chat.completion","created":1,"model":"test",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer srv.Close()
+
+	mc := config.ModelConfig{ID: "t4", Name: "local", BaseURL: srv.URL, APIKey: "sk-test", Model: "test-model"}
+	cm, err := BuildModel(context.Background(), mc, "agent-work", "user-main")
+	if err != nil {
+		t.Fatalf("BuildModel 失败: %v", err)
+	}
+	if _, err := cm.Generate(context.Background(), []*schema.Message{schema.UserMessage("hi")}); err != nil {
+		t.Fatalf("Generate 失败: %v", err)
+	}
+	if gotAgent != "agent-work" || gotUser != "user-main" {
+		t.Fatalf("身份字段不符: agent_id=%q user_id=%q", gotAgent, gotUser)
+	}
+}
+
+// TestDisableExtraFieldsNoBodyField 关闭开关后真实请求体不含 agent_id/user_id。
+func TestDisableExtraFieldsNoBodyField(t *testing.T) {
+	var hasAgent, hasUser bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err == nil {
+			_, hasAgent = payload[BodyAgentIDField]
+			_, hasUser = payload[BodyUserIDField]
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"1","object":"chat.completion","created":1,"model":"test",
@@ -189,14 +224,14 @@ func TestDisableExtraFieldsNoBodyField(t *testing.T) {
 		ID: "t3", Name: "local", BaseURL: srv.URL, APIKey: "sk-test", Model: "test-model",
 		DisableExtraFields: true,
 	}
-	cm, err := BuildModel(context.Background(), mc, "agent-x")
+	cm, err := BuildModel(context.Background(), mc, "agent-x", "user-x")
 	if err != nil {
 		t.Fatalf("BuildModel 失败: %v", err)
 	}
 	if _, err := cm.Generate(context.Background(), []*schema.Message{schema.UserMessage("hi")}); err != nil {
 		t.Fatalf("Generate 失败: %v", err)
 	}
-	if hasField {
-		t.Fatalf("关闭开关后不应注入 %s 字段", BodyAgentIDField)
+	if hasAgent || hasUser {
+		t.Fatalf("关闭开关后不应注入身份字段: agent=%v user=%v", hasAgent, hasUser)
 	}
 }

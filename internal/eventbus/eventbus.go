@@ -28,12 +28,11 @@ const (
 
 // TaskStateData 任务状态载荷。
 type TaskStateData struct {
-	TaskID   string `json:"taskId"`
-	Status   string `json:"status"` // running/completed/failed/interrupted
-	Title    string `json:"title,omitempty"`
-	Error    string `json:"error,omitempty"`
+	TaskID string `json:"taskId"`
+	Status string `json:"status"` // running/completed/failed/interrupted
+	Title  string `json:"title,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
-
 
 // EventName Wails 事件名。
 const EventName = "agent:event"
@@ -78,9 +77,12 @@ type ToolCallData struct {
 }
 
 // LLMUsageData LLM 调用用量与成本载荷（FR-5.4）。
+// Model 为显示名，ModelID 为实际调用模型配置 ID（Agent 独立模型时用于对账）。
 type LLMUsageData struct {
 	TaskID       string  `json:"taskId,omitempty"`
+	AgentID      string  `json:"agentId,omitempty"`
 	Model        string  `json:"model"`
+	ModelID      string  `json:"modelId,omitempty"`
 	InputTokens  int64   `json:"inputTokens"`
 	OutputTokens int64   `json:"outputTokens"`
 	CostIn       float64 `json:"costIn"`  // 元
@@ -89,9 +91,10 @@ type LLMUsageData struct {
 
 // ModelFallbackData 模型故障切换载荷（FR-5.6）。
 type ModelFallbackData struct {
-	From   string `json:"from"`
-	To     string `json:"to"`
-	Reason string `json:"reason"`
+	AgentID string `json:"agentId,omitempty"`
+	From    string `json:"from"`
+	To      string `json:"to"`
+	Reason  string `json:"reason"`
 }
 
 // ApprovalRequestData 审批请求载荷。

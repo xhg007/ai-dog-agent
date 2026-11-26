@@ -120,9 +120,12 @@ func (f *FallbackModel) BindTools(tools []*schema.ToolInfo) error {
 
 // BuildModelChain 按 Models 配置构建带故障切换的模型链：
 // 激活模型优先，其余按列表顺序作为备用。仅一个可用模型时直接返回（无装饰）。
-// 返回（模型, 主模型名）。构建失败（缺 Key 等）的模型跳过；全部失败返回错误。
-func BuildModelChain(ctx context.Context, mgr *config.Manager, agentID string,
-	notify func(from, to, reason string)) (model.ChatModel, string, error) {
+// 返回（模型, 主模型名, 实际主模型配置, 错误）。构建失败（缺 Key 等）的模型跳过；
+// 全部失败返回错误。实际主模型配置用于用量按真实模型归因。
+// agentID 标识调用方 Agent，userID 标识所属用户；主 Agent 两者相同，
+// work agent 使用自身 agent_id + 主 Agent 的 user_id。
+func BuildModelChain(ctx context.Context, mgr *config.Manager, agentID, userID string,
+	notify func(from, to, reason string)) (model.ChatModel, string, config.ModelConfig, error) {
 	cfg := mgr.Get()
 	activeID := cfg.ActiveModelID
 	var ordered []config.ModelConfig
@@ -138,19 +141,23 @@ func BuildModelChain(ctx context.Context, mgr *config.Manager, agentID string,
 	}
 
 	var chain []namedModel
+	var actualPrimary config.ModelConfig
 	for _, mc := range ordered {
-		cm, err := BuildModel(ctx, mc, agentID)
+		cm, err := BuildModel(ctx, mc, agentID, userID)
 		if err != nil {
 			continue // 缺 Key/Model ID 的配置跳过
+		}
+		if len(chain) == 0 {
+			actualPrimary = mc
 		}
 		chain = append(chain, namedModel{Name: mc.Name, CM: cm})
 	}
 	switch len(chain) {
 	case 0:
-		return nil, "", fmt.Errorf("无可用模型配置（检查 API Key 与 Model ID）")
+		return nil, "", config.ModelConfig{}, fmt.Errorf("无可用模型配置（检查 API Key 与 Model ID）")
 	case 1:
-		return chain[0].CM, chain[0].Name, nil
+		return chain[0].CM, chain[0].Name, actualPrimary, nil
 	default:
-		return NewFallbackModel(chain, notify), chain[0].Name, nil
+		return NewFallbackModel(chain, notify), chain[0].Name, actualPrimary, nil
 	}
 }

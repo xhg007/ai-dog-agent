@@ -14,11 +14,11 @@ const (
 
 // Task 一次用户消息触发的执行轮次。
 type Task struct {
-	ID        string `json:"id"`        // UUID，由调用方生成
-	SessionID string `json:"sessionId"` // 关联线程，前端跳转用
-	Title     string `json:"title"`
-	Status    string `json:"status"` // StatusRunning/StatusCompleted/StatusFailed/StatusInterrupted
-	Error     string `json:"error,omitempty"`
+	ID        string    `json:"id"`        // UUID，由调用方生成
+	SessionID string    `json:"sessionId"` // 关联线程，前端跳转用
+	Title     string    `json:"title"`
+	Status    string    `json:"status"` // StatusRunning/StatusCompleted/StatusFailed/StatusInterrupted
+	Error     string    `json:"error,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	// FinishedAt 终态时间；运行中为 nil（JSON 省略，避免前端看到零值时间）。
 	FinishedAt *time.Time `json:"finishedAt,omitempty"`
@@ -28,7 +28,7 @@ type Task struct {
 type TaskEvent struct {
 	ID        int64     `json:"id"`
 	TaskID    string    `json:"taskId"`
-	Type      string    `json:"type"` // task_state/tool_call/tool_result/llm_usage/model_fallback/chat_error...
+	Type      string    `json:"type"`    // task_state/tool_call/tool_result/llm_usage/model_fallback/chat_error...
 	Payload   string    `json:"payload"` // JSON 文本
 	CreatedAt time.Time `json:"createdAt"`
 }
@@ -38,6 +38,7 @@ type TokenUsage struct {
 	ID           int64     `json:"id"`
 	TaskID       string    `json:"taskId"`
 	Model        string    `json:"model"`
+	ModelID      string    `json:"modelId,omitempty"` // 实际调用模型配置 ID（agent 独立模型时对账用）
 	InputTokens  int64     `json:"inputTokens"`
 	OutputTokens int64     `json:"outputTokens"`
 	CostIn       float64   `json:"costIn"`  // 元
@@ -50,7 +51,7 @@ type TokenUsage struct {
 type Checkpoint struct {
 	ID         int64     `json:"id"`
 	TaskID     string    `json:"taskId"`
-	Seq        int64     `json:"seq"` // 任务内递增序号
+	Seq        int64     `json:"seq"`   // 任务内递增序号
 	Phase      string    `json:"phase"` // "before" / "after"
 	ToolName   string    `json:"toolName"`
 	ToolArgs   string    `json:"toolArgs"`   // JSON 文本

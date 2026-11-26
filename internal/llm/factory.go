@@ -31,17 +31,24 @@ func modelTimeout(mc config.ModelConfig) time.Duration {
 }
 
 // extraFields 构造请求体扩展字段；关闭开关或 agentID 为空时返回空 map。
-func extraFields(mc config.ModelConfig, agentID string) map[string]any {
-	extra := map[string]any{}
-	if agentID != "" && !mc.DisableExtraFields {
-		extra[BodyAgentIDField] = agentID
-		extra[BodyUserIDField] = agentID
+// agentID 与 userID 分别注入：主 Agent 两者相同，work agent 的 userID 统一为主 Agent ID。
+// userID 为空时回退 agentID，兼容只关心 agent 身份的调用方。
+func extraFields(mc config.ModelConfig, agentID, userID string) map[string]any {
+	if mc.DisableExtraFields || agentID == "" {
+		return map[string]any{}
 	}
-	return extra
+	if userID == "" {
+		userID = agentID
+	}
+	return map[string]any{
+		BodyAgentIDField: agentID,
+		BodyUserIDField:  userID,
+	}
 }
 
 // BuildModel 根据模型配置构建 eino ChatModel；agentID 非空时注入请求体。
-func BuildModel(ctx context.Context, mc config.ModelConfig, agentID string) (model.ChatModel, error) {
+// agentID 标识调用方 Agent，userID 标识所属用户（work agent 统一为主 Agent ID）。
+func BuildModel(ctx context.Context, mc config.ModelConfig, agentID, userID string) (model.ChatModel, error) {
 	if mc.APIKey == "" {
 		return nil, fmt.Errorf("模型 %q 缺少 API Key", mc.Name)
 	}
@@ -53,7 +60,7 @@ func BuildModel(ctx context.Context, mc config.ModelConfig, agentID string) (mod
 		BaseURL:     mc.BaseURL, // 非空时切换到自定义 OpenAI 兼容端点
 		Model:       mc.Model,
 		Timeout:     modelTimeout(mc),
-		ExtraFields: extraFields(mc, agentID),
+		ExtraFields: extraFields(mc, agentID, userID),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("初始化模型失败(%s): %w", mc.Name, err)

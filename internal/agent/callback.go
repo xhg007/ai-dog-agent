@@ -27,6 +27,14 @@ type obsInfo struct {
 	SessionID string
 	TaskID    string
 	Snapshot  string // runTurn 初始消息历史 JSON（checkpoint 用）
+
+	// 实际调用模型信息（work agent 可能使用独立模型）；
+	// 为空时 recordModelUsage 回退全局激活模型单价。
+	AgentID   string
+	ModelID   string
+	ModelName string
+	PriceIn   float64
+	PriceOut  float64
 }
 
 type obsKey struct{}
@@ -137,26 +145,29 @@ func newObsHandler(tasks *task.Manager) callbacks.Handler {
 	return b.Build()
 }
 
-// recordModelUsage 记录一次 LLM 调用用量：成本按激活模型单价折算（元/1M tokens）。
+// recordModelUsage 记录一次 LLM 调用用量：成本按实际调用模型单价折算（元/1M tokens）。
+// 优先使用 obsInfo 中的模型信息（work agent 独立模型），缺失时回退全局激活模型。
 func recordModelUsage(tasks *task.Manager, oi *obsInfo, info *callbacks.RunInfo, usage *model.TokenUsage) {
 	if tasks == nil || usage == nil || oi == nil || oi.TaskID == "" {
 		return
 	}
-	var modelName string
-	var pIn, pOut float64
-	if fn, ok := obsPriceFn.Load().(PriceFunc); ok && fn != nil {
-		modelName, pIn, pOut = fn()
+	modelID, modelName := oi.ModelID, oi.ModelName
+	pIn, pOut := oi.PriceIn, oi.PriceOut
+	if modelID == "" && modelName == "" {
+		if fn, ok := obsPriceFn.Load().(PriceFunc); ok && fn != nil {
+			modelName, pIn, pOut = fn()
+		}
 	}
 	in, out := int64(usage.PromptTokens), int64(usage.CompletionTokens)
 	data := eventbus.LLMUsageData{
-		TaskID: oi.TaskID, Model: modelName,
+		TaskID: oi.TaskID, AgentID: oi.AgentID, Model: modelName, ModelID: modelID,
 		InputTokens: in, OutputTokens: out,
 		CostIn:  float64(in) / 1e6 * pIn,
 		CostOut: float64(out) / 1e6 * pOut,
 	}
 	tasks.Emit(oi.SessionID, oi.TaskID, eventbus.EvLLMUsage, data)
 	tasks.AppendTokenUsage(store.TokenUsage{
-		TaskID: oi.TaskID, Model: modelName,
+		TaskID: oi.TaskID, Model: modelName, ModelID: modelID,
 		InputTokens: in, OutputTokens: out,
 		CostIn: data.CostIn, CostOut: data.CostOut,
 		CreatedAt: time.Now(),

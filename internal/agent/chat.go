@@ -52,9 +52,10 @@ type chatSession struct {
 	runner        *adk.Runner
 	cancel        context.CancelFunc
 	running       bool
-	currentTaskID string // 当前轮次的任务 ID（M5）
-	title         string // 线程标题（取首条用户消息摘要）
-	modelName     string // 构建 Agent 时使用的主模型显示名（chat_started 事件上报）
+	currentTaskID string             // 当前轮次的任务 ID（M5）
+	title         string             // 线程标题（取首条用户消息摘要）
+	modelName     string             // 构建 Agent 时使用的主模型显示名（chat_started 事件上报）
+	modelCfg      config.ModelConfig // 实际主模型配置（用量按真实模型归因）
 	createdAt     time.Time
 	lastActive    time.Time
 	messages      []StoredMessage // 持久化消息历史
@@ -286,11 +287,11 @@ func (s *ChatService) initAgentLocked(sess *chatSession) error {
 	// 带故障切换的模型链（FR-5.6）：激活模型优先，其余按配置顺序备用；
 	// 瞬态错误（网络/429/5xx/超时）自动切换并上报 model_fallback 事件
 	sessionID := sess.id
-	cm, modelName, err := llm.BuildModelChain(ctx, s.cfg, sess.agentID,
+	cm, modelName, modelCfg, err := llm.BuildModelChain(ctx, s.cfg, sess.agentID, sess.agentID,
 		func(from, to, reason string) {
 			slog.Warn("模型故障切换", "session", sessionID, "from", from, "to", to, "reason", reason)
 			s.bus.Emit(eventbus.Event{Type: eventbus.EvModelFallback, SessionID: sessionID,
-				Data: eventbus.ModelFallbackData{From: from, To: to, Reason: reason}})
+				Data: eventbus.ModelFallbackData{AgentID: sess.agentID, From: from, To: to, Reason: reason}})
 		})
 	if err != nil {
 		return err
@@ -319,8 +320,9 @@ func (s *ChatService) initAgentLocked(sess *chatSession) error {
 		Agent:           ag,
 		EnableStreaming: true,
 	})
-	// 记录主模型显示名：chat_started 事件如实上报，供会话头部展示
+	// 记录主模型显示名与实际模型配置：chat_started 事件如实上报，用量按真实模型归因
 	sess.modelName = modelName
+	sess.modelCfg = modelCfg
 	// 记录构建时的配置版本：Settings 保存后 configChanged 为 true，下一轮重建
 	sess.configVersion = s.cfg.Version()
 	slog.Info("会话 Agent 已构建", "session", sess.id, "agentId", sess.agentID,
@@ -377,10 +379,14 @@ func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
 	s.mu.Lock()
 	input := historyMessages(sess.messages)
 	snapshot := marshalMessages(sess.messages)
+	agentID := sess.agentID
+	modelCfg := sess.modelCfg
 	s.mu.Unlock()
-	// 观测上下文：会话/任务标识 + 消息快照（callbacks handler 写 checkpoint 用）
+	// 观测上下文：会话/任务标识 + 消息快照 + 实际模型（用量归因）
 	runCtx := withObsInfo(ctx, &obsInfo{
 		SessionID: sessionID, TaskID: taskID, Snapshot: snapshot,
+		AgentID: agentID, ModelID: modelCfg.ID, ModelName: modelCfg.Name,
+		PriceIn: modelCfg.PriceIn, PriceOut: modelCfg.PriceOut,
 	})
 	iter := sess.runner.Run(runCtx, input)
 	var sb []byte

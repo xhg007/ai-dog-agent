@@ -88,6 +88,40 @@ func TestObsHandler_ModelUsage(t *testing.T) {
 	}
 }
 
+// TestObsHandler_ModelUsageActualModel 用量按 obsInfo 中的实际模型归因，
+// 事件携带 agentId/modelId，成本按实际模型单价折算。
+func TestObsHandler_ModelUsageActualModel(t *testing.T) {
+	m, st, ch, cleanup := newObsTestEnv(t)
+	defer cleanup()
+	_ = st
+	h := newObsHandler(m)
+
+	taskID, _ := m.Start("s1", "t")
+	_ = waitEventCb(t, ch, eventbus.EvTaskState)
+
+	ctx := withObsInfo(context.Background(), &obsInfo{
+		SessionID: "s1", TaskID: taskID, Snapshot: "[]",
+		AgentID: "agent-work", ModelID: "coder", ModelName: "Coder",
+		PriceIn: 2, PriceOut: 4,
+	})
+	info := &callbacks.RunInfo{Name: "chat", Type: "OpenAI", Component: components.ComponentOfChatModel}
+	h.OnEnd(ctx, info, &model.CallbackOutput{TokenUsage: &model.TokenUsage{
+		PromptTokens: 1_000_000, CompletionTokens: 500_000, TotalTokens: 1_500_000,
+	}})
+
+	ev := waitEventCb(t, ch, eventbus.EvLLMUsage)
+	du, ok := ev.Data.(eventbus.LLMUsageData)
+	if !ok {
+		t.Fatalf("llm_usage 事件载荷类型不符: %T", ev.Data)
+	}
+	if du.AgentID != "agent-work" || du.ModelID != "coder" || du.Model != "Coder" {
+		t.Fatalf("实际模型归因不符: %+v", du)
+	}
+	if du.CostIn != 2 || du.CostOut != 2 {
+		t.Fatalf("成本应按实际模型单价折算: in=%v out=%v", du.CostIn, du.CostOut)
+	}
+}
+
 // TestObsHandler_ToolCheckpoints Tool 节点 before/after checkpoint + tool_call 事件。
 func TestObsHandler_ToolCheckpoints(t *testing.T) {
 	m, st, ch, cleanup := newObsTestEnv(t)
