@@ -169,11 +169,7 @@ func OrchestratorTools(ctx context.Context, ws *workspace.Manager, cm model.Base
 	// Go 构建工具（go_test / go_vet / go_build）：白名单内免审批（FR-3.1/3.2）
 	toolList = append(toolList, tools.GoToolset(ws)...)
 	// run_shell：白名单内免审批，白名单外经审批门（FR-4.2）
-	shellTool, err := utils.InferTool("run_shell",
-		"在项目工作区内执行 Shell 命令。白名单内命令免审批直接执行；白名单外命令需用户审批。命令不经 shell 解释（无注入面）。",
-		func(ctx context.Context, args tools.ShellArgs) (string, error) {
-			return tools.ShellRun(ctx, ws, whitelist, appr, sessionID, args.Command)
-		})
+	shellTool, err := tools.ShellTool(ws, whitelist, appr, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("注册 run_shell 工具失败: %w", err)
 	}
