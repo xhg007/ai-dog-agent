@@ -6,7 +6,7 @@ export {
     ChatService
 };
 
-export {
+export type {
     SessionInfo,
     StoredMessage
 } from "./models.js";

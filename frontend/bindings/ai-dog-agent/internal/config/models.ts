@@ -3,53 +3,23 @@
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import { Create as $Create } from "@wailsio/runtime";
-
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore: Unused imports
 import * as agentspec$0 from "../agentspec/models.js";
 
 /**
  * AuditFinding 一条审计发现。
  */
-export class AuditFinding {
+export interface AuditFinding {
     "severity": Severity;
     "rule": string;
     "file": string;
     "evidence": string;
-
-    /** Creates a new AuditFinding instance. */
-    constructor($$source: Partial<AuditFinding> = {}) {
-        if (!("severity" in $$source)) {
-            this["severity"] = Severity.$zero;
-        }
-        if (!("rule" in $$source)) {
-            this["rule"] = "";
-        }
-        if (!("file" in $$source)) {
-            this["file"] = "";
-        }
-        if (!("evidence" in $$source)) {
-            this["evidence"] = "";
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new AuditFinding instance from a string or object.
-     */
-    static createFrom($$source: any = {}): AuditFinding {
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        return new AuditFinding($$parsedSource as Partial<AuditFinding>);
-    }
 }
 
 /**
  * AuditReport 审计结果汇总。
  */
-export class AuditReport {
-    "findings": AuditFinding[];
+export interface AuditReport {
+    "findings": AuditFinding[] | null;
     "highCount": number;
     "mediumCount": number;
     "lowCount": number;
@@ -58,59 +28,26 @@ export class AuditReport {
      * 存在高危即应自动拉黑
      */
     "blocked": boolean;
-
-    /** Creates a new AuditReport instance. */
-    constructor($$source: Partial<AuditReport> = {}) {
-        if (!("findings" in $$source)) {
-            this["findings"] = [];
-        }
-        if (!("highCount" in $$source)) {
-            this["highCount"] = 0;
-        }
-        if (!("mediumCount" in $$source)) {
-            this["mediumCount"] = 0;
-        }
-        if (!("lowCount" in $$source)) {
-            this["lowCount"] = 0;
-        }
-        if (!("blocked" in $$source)) {
-            this["blocked"] = false;
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new AuditReport instance from a string or object.
-     */
-    static createFrom($$source: any = {}): AuditReport {
-        const $$createField0_0 = $$createType1;
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        if ("findings" in $$parsedSource) {
-            $$parsedSource["findings"] = $$createField0_0($$parsedSource["findings"]);
-        }
-        return new AuditReport($$parsedSource as Partial<AuditReport>);
-    }
 }
 
 /**
  * Config 应用配置根对象。
  */
-export class Config {
-    "models": ModelConfig[];
+export interface Config {
+    "models": ModelConfig[] | null;
     "activeModelId": string;
 
     /**
      * 上次使用的工作区
      */
     "workspacePath"?: string;
-    "skills": SkillConfig[];
-    "mcpServers": MCPServerConfig[];
+    "skills": SkillConfig[] | null;
+    "mcpServers": MCPServerConfig[] | null;
 
     /**
      * run_shell 允许的程序名（未配置时回退默认）
      */
-    "shellWhitelist"?: string[];
+    "shellWhitelist"?: string[] | null;
 
     /**
      * AgentSmithAuto 任务失败/取消后自动运行 agent-smith（默认关闭）。
@@ -120,62 +57,12 @@ export class Config {
     /**
      * TrustedProjects 已确认信任的项目根（绝对路径，已规范化）。
      */
-    "trustedProjects"?: string[];
+    "trustedProjects"?: string[] | null;
 
     /**
      * BlockedProjects 审计高危自动拉黑的项目根（绝对路径）。
      */
-    "blockedProjects"?: string[];
-
-    /** Creates a new Config instance. */
-    constructor($$source: Partial<Config> = {}) {
-        if (!("models" in $$source)) {
-            this["models"] = [];
-        }
-        if (!("activeModelId" in $$source)) {
-            this["activeModelId"] = "";
-        }
-        if (!("skills" in $$source)) {
-            this["skills"] = [];
-        }
-        if (!("mcpServers" in $$source)) {
-            this["mcpServers"] = [];
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new Config instance from a string or object.
-     */
-    static createFrom($$source: any = {}): Config {
-        const $$createField0_0 = $$createType3;
-        const $$createField3_0 = $$createType5;
-        const $$createField4_0 = $$createType7;
-        const $$createField5_0 = $$createType8;
-        const $$createField7_0 = $$createType8;
-        const $$createField8_0 = $$createType8;
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        if ("models" in $$parsedSource) {
-            $$parsedSource["models"] = $$createField0_0($$parsedSource["models"]);
-        }
-        if ("skills" in $$parsedSource) {
-            $$parsedSource["skills"] = $$createField3_0($$parsedSource["skills"]);
-        }
-        if ("mcpServers" in $$parsedSource) {
-            $$parsedSource["mcpServers"] = $$createField4_0($$parsedSource["mcpServers"]);
-        }
-        if ("shellWhitelist" in $$parsedSource) {
-            $$parsedSource["shellWhitelist"] = $$createField5_0($$parsedSource["shellWhitelist"]);
-        }
-        if ("trustedProjects" in $$parsedSource) {
-            $$parsedSource["trustedProjects"] = $$createField7_0($$parsedSource["trustedProjects"]);
-        }
-        if ("blockedProjects" in $$parsedSource) {
-            $$parsedSource["blockedProjects"] = $$createField8_0($$parsedSource["blockedProjects"]);
-        }
-        return new Config($$parsedSource as Partial<Config>);
-    }
+    "blockedProjects"?: string[] | null;
 }
 
 /**
@@ -186,7 +73,7 @@ export class Config {
  * 
  * Headers 为 KEY=VALUE 行（每行一条），值支持 ${ENV} 环境变量展开。
  */
-export class MCPServerConfig {
+export interface MCPServerConfig {
     "id": string;
     "name": string;
 
@@ -195,7 +82,7 @@ export class MCPServerConfig {
      */
     "transport"?: string;
     "command": string;
-    "args"?: string[];
+    "args"?: string[] | null;
     "env"?: string;
     "url"?: string;
     "headers"?: string;
@@ -206,43 +93,13 @@ export class MCPServerConfig {
      * 注解来自服务器、不可完全信任，默认关闭。
      */
     "autoApproveReadOnly"?: boolean;
-
-    /** Creates a new MCPServerConfig instance. */
-    constructor($$source: Partial<MCPServerConfig> = {}) {
-        if (!("id" in $$source)) {
-            this["id"] = "";
-        }
-        if (!("name" in $$source)) {
-            this["name"] = "";
-        }
-        if (!("command" in $$source)) {
-            this["command"] = "";
-        }
-        if (!("enabled" in $$source)) {
-            this["enabled"] = false;
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new MCPServerConfig instance from a string or object.
-     */
-    static createFrom($$source: any = {}): MCPServerConfig {
-        const $$createField4_0 = $$createType8;
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        if ("args" in $$parsedSource) {
-            $$parsedSource["args"] = $$createField4_0($$parsedSource["args"]);
-        }
-        return new MCPServerConfig($$parsedSource as Partial<MCPServerConfig>);
-    }
 }
 
 /**
  * ModelConfig 一个 OpenAI 兼容模型配置。
  * BaseURL/APIKey/Model 覆盖 DeepSeek、Qwen、GLM、OpenAI 等所有兼容供应商。
  */
-export class ModelConfig {
+export interface ModelConfig {
     /**
      * 唯一 ID（uuid）
      */
@@ -295,76 +152,21 @@ export class ModelConfig {
      * nil 或不开启时不注入，兼容拒绝未知字段的端点。
      */
     "includeUsage"?: boolean | null;
-
-    /** Creates a new ModelConfig instance. */
-    constructor($$source: Partial<ModelConfig> = {}) {
-        if (!("id" in $$source)) {
-            this["id"] = "";
-        }
-        if (!("name" in $$source)) {
-            this["name"] = "";
-        }
-        if (!("baseURL" in $$source)) {
-            this["baseURL"] = "";
-        }
-        if (!("apiKey" in $$source)) {
-            this["apiKey"] = "";
-        }
-        if (!("model" in $$source)) {
-            this["model"] = "";
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new ModelConfig instance from a string or object.
-     */
-    static createFrom($$source: any = {}): ModelConfig {
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        return new ModelConfig($$parsedSource as Partial<ModelConfig>);
-    }
 }
 
 /**
  * ProjectConfig 项目级配置集合。
  */
-export class ProjectConfig {
+export interface ProjectConfig {
     "main"?: ProjectMain;
-    "mcpServers"?: MCPServerConfig[];
-    "skills"?: SkillConfig[];
-
-    /** Creates a new ProjectConfig instance. */
-    constructor($$source: Partial<ProjectConfig> = {}) {
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new ProjectConfig instance from a string or object.
-     */
-    static createFrom($$source: any = {}): ProjectConfig {
-        const $$createField0_0 = $$createType9;
-        const $$createField1_0 = $$createType7;
-        const $$createField2_0 = $$createType5;
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        if ("main" in $$parsedSource) {
-            $$parsedSource["main"] = $$createField0_0($$parsedSource["main"]);
-        }
-        if ("mcpServers" in $$parsedSource) {
-            $$parsedSource["mcpServers"] = $$createField1_0($$parsedSource["mcpServers"]);
-        }
-        if ("skills" in $$parsedSource) {
-            $$parsedSource["skills"] = $$createField2_0($$parsedSource["skills"]);
-        }
-        return new ProjectConfig($$parsedSource as Partial<ProjectConfig>);
-    }
+    "mcpServers"?: MCPServerConfig[] | null;
+    "skills"?: SkillConfig[] | null;
 }
 
 /**
  * ProjectMain 主 Agent 的项目级覆盖（.aidog/main.json）。
  */
-export class ProjectMain {
+export interface ProjectMain {
     /**
      * 覆盖激活模型（ID/Name/Model）
      */
@@ -373,89 +175,28 @@ export class ProjectMain {
     /**
      * 主 Agent 工具白名单
      */
-    "tools"?: string[];
+    "tools"?: string[] | null;
 
     /**
      * 引用的 Skill（ID/Name）
      */
-    "skills"?: string[];
+    "skills"?: string[] | null;
 
     /**
      * 引用的 MCP Server（ID/Name）
      */
-    "mcp_servers"?: string[];
+    "mcp_servers"?: string[] | null;
     "budget"?: agentspec$0.Budget;
     "context"?: agentspec$0.ContextConfig;
-
-    /** Creates a new ProjectMain instance. */
-    constructor($$source: Partial<ProjectMain> = {}) {
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new ProjectMain instance from a string or object.
-     */
-    static createFrom($$source: any = {}): ProjectMain {
-        const $$createField1_0 = $$createType8;
-        const $$createField2_0 = $$createType8;
-        const $$createField3_0 = $$createType8;
-        const $$createField4_0 = $$createType10;
-        const $$createField5_0 = $$createType11;
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        if ("tools" in $$parsedSource) {
-            $$parsedSource["tools"] = $$createField1_0($$parsedSource["tools"]);
-        }
-        if ("skills" in $$parsedSource) {
-            $$parsedSource["skills"] = $$createField2_0($$parsedSource["skills"]);
-        }
-        if ("mcp_servers" in $$parsedSource) {
-            $$parsedSource["mcp_servers"] = $$createField3_0($$parsedSource["mcp_servers"]);
-        }
-        if ("budget" in $$parsedSource) {
-            $$parsedSource["budget"] = $$createField4_0($$parsedSource["budget"]);
-        }
-        if ("context" in $$parsedSource) {
-            $$parsedSource["context"] = $$createField5_0($$parsedSource["context"]);
-        }
-        return new ProjectMain($$parsedSource as Partial<ProjectMain>);
-    }
 }
 
 /**
  * ProjectStatus 项目配置状态与审计报告。
  */
-export class ProjectStatus {
+export interface ProjectStatus {
     "root": string;
     "status": ProjectTrustStatus;
     "audit": AuditReport;
-
-    /** Creates a new ProjectStatus instance. */
-    constructor($$source: Partial<ProjectStatus> = {}) {
-        if (!("root" in $$source)) {
-            this["root"] = "";
-        }
-        if (!("status" in $$source)) {
-            this["status"] = ProjectTrustStatus.$zero;
-        }
-        if (!("audit" in $$source)) {
-            this["audit"] = (new AuditReport());
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new ProjectStatus instance from a string or object.
-     */
-    static createFrom($$source: any = {}): ProjectStatus {
-        const $$createField2_0 = $$createType12;
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        if ("audit" in $$parsedSource) {
-            $$parsedSource["audit"] = $$createField2_0($$parsedSource["audit"]);
-        }
-        return new ProjectStatus($$parsedSource as Partial<ProjectStatus>);
-    }
 }
 
 /**
@@ -489,54 +230,10 @@ export enum Severity {
 /**
  * SkillConfig 可复用的技能指令包（启用后追加到主 Agent 动态上下文）。
  */
-export class SkillConfig {
+export interface SkillConfig {
     "id": string;
     "name": string;
     "description": string;
     "prompt": string;
     "enabled": boolean;
-
-    /** Creates a new SkillConfig instance. */
-    constructor($$source: Partial<SkillConfig> = {}) {
-        if (!("id" in $$source)) {
-            this["id"] = "";
-        }
-        if (!("name" in $$source)) {
-            this["name"] = "";
-        }
-        if (!("description" in $$source)) {
-            this["description"] = "";
-        }
-        if (!("prompt" in $$source)) {
-            this["prompt"] = "";
-        }
-        if (!("enabled" in $$source)) {
-            this["enabled"] = false;
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new SkillConfig instance from a string or object.
-     */
-    static createFrom($$source: any = {}): SkillConfig {
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        return new SkillConfig($$parsedSource as Partial<SkillConfig>);
-    }
 }
-
-// Private type creation functions
-const $$createType0 = AuditFinding.createFrom;
-const $$createType1 = $Create.Array($$createType0);
-const $$createType2 = ModelConfig.createFrom;
-const $$createType3 = $Create.Array($$createType2);
-const $$createType4 = SkillConfig.createFrom;
-const $$createType5 = $Create.Array($$createType4);
-const $$createType6 = MCPServerConfig.createFrom;
-const $$createType7 = $Create.Array($$createType6);
-const $$createType8 = $Create.Array($Create.Any);
-const $$createType9 = ProjectMain.createFrom;
-const $$createType10 = agentspec$0.Budget.createFrom;
-const $$createType11 = agentspec$0.ContextConfig.createFrom;
-const $$createType12 = AuditReport.createFrom;

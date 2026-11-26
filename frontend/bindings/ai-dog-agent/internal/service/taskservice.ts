@@ -9,7 +9,7 @@
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Create } from "@wailsio/runtime";
+import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -18,34 +18,20 @@ import * as store$0 from "../store/models.js";
 /**
  * GetDailyUsage 近 days 天按日聚合的 Token 用量与成本报表。
  */
-export function GetDailyUsage(days: number): $CancellablePromise<store$0.DailyUsageRow[]> {
-    return $Call.ByID(2827425288, days).then(($result: any) => {
-        return $$createType1($result);
-    });
+export function GetDailyUsage(days: number): $CancellablePromise<store$0.DailyUsageRow[] | null> {
+    return $Call.ByID(2827425288, days);
 }
 
 /**
  * GetTaskEvents 任务事件流（升序）。
  */
-export function GetTaskEvents(taskID: string, limit: number): $CancellablePromise<store$0.TaskEvent[]> {
-    return $Call.ByID(1962784496, taskID, limit).then(($result: any) => {
-        return $$createType3($result);
-    });
+export function GetTaskEvents(taskID: string, limit: number): $CancellablePromise<store$0.TaskEvent[] | null> {
+    return $Call.ByID(1962784496, taskID, limit);
 }
 
 /**
  * ListTasks 最近任务列表（created_at 降序）。
  */
-export function ListTasks(limit: number): $CancellablePromise<store$0.Task[]> {
-    return $Call.ByID(879950682, limit).then(($result: any) => {
-        return $$createType5($result);
-    });
+export function ListTasks(limit: number): $CancellablePromise<store$0.Task[] | null> {
+    return $Call.ByID(879950682, limit);
 }
-
-// Private type creation functions
-const $$createType0 = store$0.DailyUsageRow.createFrom;
-const $$createType1 = $Create.Array($$createType0);
-const $$createType2 = store$0.TaskEvent.createFrom;
-const $$createType3 = $Create.Array($$createType2);
-const $$createType4 = store$0.Task.createFrom;
-const $$createType5 = $Create.Array($$createType4);

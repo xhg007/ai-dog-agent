@@ -10,7 +10,7 @@
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Create } from "@wailsio/runtime";
+import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -33,19 +33,15 @@ export function DeleteSession(sessionID: string): $CancellablePromise<boolean> {
 /**
  * GetMessages 返回指定会话的持久化消息历史（供前端切换线程时恢复）。
  */
-export function GetMessages(sessionID: string): $CancellablePromise<$models.StoredMessage[]> {
-    return $Call.ByID(1166070419, sessionID).then(($result: any) => {
-        return $$createType1($result);
-    });
+export function GetMessages(sessionID: string): $CancellablePromise<$models.StoredMessage[] | null> {
+    return $Call.ByID(1166070419, sessionID);
 }
 
 /**
  * ListSessions 返回全部线程，按最近活跃倒序。
  */
-export function ListSessions(): $CancellablePromise<$models.SessionInfo[]> {
-    return $Call.ByID(2529885276).then(($result: any) => {
-        return $$createType3($result);
-    });
+export function ListSessions(): $CancellablePromise<$models.SessionInfo[] | null> {
+    return $Call.ByID(2529885276);
 }
 
 /**
@@ -75,9 +71,3 @@ export function RecoverTask(taskID: string): $CancellablePromise<void> {
 export function SendMessage(sessionID: string, content: string): $CancellablePromise<void> {
     return $Call.ByID(2586334322, sessionID, content);
 }
-
-// Private type creation functions
-const $$createType0 = $models.StoredMessage.createFrom;
-const $$createType1 = $Create.Array($$createType0);
-const $$createType2 = $models.SessionInfo.createFrom;
-const $$createType3 = $Create.Array($$createType2);
