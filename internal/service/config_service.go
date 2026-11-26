@@ -141,3 +141,19 @@ func (c *ConfigService) SaveProjectSkills(skills []config.SkillConfig) error {
 	pc.Skills = skills
 	return c.SaveProjectConfig(pc)
 }
+
+// ListAgentBackups 返回指定项目 Agent 的配置备份（最新在前）。
+func (c *ConfigService) ListAgentBackups(name string) ([]agentspec.BackupInfo, error) {
+	if !c.ws.IsSet() {
+		return []agentspec.BackupInfo{}, nil
+	}
+	return agentspec.ListBackups(c.ws.Root(), name)
+}
+
+// RestoreProjectAgent 用指定备份恢复 Agent 配置（恢复前会备份当前配置）。
+func (c *ConfigService) RestoreProjectAgent(name, backupPath string) error {
+	if !c.ws.IsSet() {
+		return errors.New("未设置工作区")
+	}
+	return agentspec.Restore(c.ws.Root(), name, backupPath)
+}

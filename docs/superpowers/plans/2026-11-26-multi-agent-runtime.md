@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-26-multi-agent-architecture-design.md` §3.1–3.6、§6 阶段 A。
 
-**Status:** 阶段 A/B/C 已完成（2026-11-26）；阶段 D–E 未开始。
+**Status:** 阶段 A/B/C/D 已完成（2026-11-26）；阶段 E 未开始。
 
 ## Global Constraints
 
@@ -122,9 +122,14 @@
 - [x] `agent_message` 事件与前端可折叠卡片；卡片仅展示当前运行事件，不写入会话历史。
 - [x] 测试：主→work、work→work、历史连续性/截断、并发串行、超时、递归、事件载荷、未知目标。
 
-### 阶段 D：agent-smith
+### 阶段 D：agent-smith（已完成 2026-11-26）
 
-- 应用级后台触发（任务结束/手动），读取任务与配置生成/修改 Spec，写操作走审批。
+- [x] `Smith` 运行器：固定 smith ID、读取失败/取消任务最近 30 条事件、当前 Agent 配置与 Skills/MCP。
+- [x] 主模型非流式生成 JSON 建议（120s / 60k / 0.4 元），解析并校验 Name/SystemPrompt/Tools/Model/Skill/MCP/Budget/Context。
+- [x] 写配置经审批；批准后先备份再 `agentspec.Save`，拒绝丢弃；`.aidog/agents/.backup` 保留 10 份。
+- [x] 自动触发开关（默认关闭，失败/取消后触发，同一任务去重）与手动 `OptimizeAgents` RPC。
+- [x] 前端：设置页优化/撤销/开关、任务面板优化按钮、ThreadPanel system 行。
+- [x] 测试：解析/校验/skip/审批拒绝/批准保存/备份/事件/锁/开关/去重/忙碌。
 
 ### 阶段 E：上下文压缩 + 配置页
 
@@ -140,6 +145,9 @@
 - **MCP 连接数**：每个 work agent 独立 MCP 集合可能启动多个子进程；`mcp.Manager` 按 server+workdir 复用连接，后续仍需上限策略。
 - **usage 缺失**：端点不返回 usage 时预算无法判定，仅记录日志，不静默通过。
 - **配置页**：项目配置 RPC 已就绪，但前端仍展示全局配置，阶段 E 统一改造。
+- **agent-smith 自动触发**：默认关闭；开启后失败/取消会自动消耗一次主模型调用。
+- **smith 修改范围**：每次只处理一个 work agent 的一次修改，不批量；不改主 Agent/全局配置。
+- **smith 备份**：`.aidog/agents/.backup` 保留最近 10 份；跨项目各自独立。
 - **私聊历史**：Registry 仅内存保存最近 40 条，跨重启不保留；后续可持久化。
 - **dispatch 与私聊并发**：dispatch 仍走 `adk.NewAgentTool`，不读写私聊历史；同一 Agent 的 dispatch 与私聊可能并发（已确认取舍）。
 - **私聊目标**：主 Agent 不作为私聊目标（避免与主运行冲突）；work→主会返回明确错误。

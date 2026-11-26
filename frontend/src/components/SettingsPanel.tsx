@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, Save, Trash2 } from 'lucide-react'
+import { Plus, Save, Trash2, Undo2, Wand2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -8,6 +8,7 @@ import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ConfigService, MCPService, TaskService } from '../../bindings/ai-dog-agent/internal/service/index.js'
+import { ChatService } from '../../bindings/ai-dog-agent/internal/agent/index.js'
 import {
   applyGlass, loadGlass, saveGlass,
   DEFAULT_GLASS_ALPHA, DEFAULT_GLASS_BLUR,
@@ -73,6 +74,7 @@ interface AppConfig {
   skills: SkillConfig[]
   mcpServers: MCPServerConfig[]
   shellWhitelist: string[]
+  agentSmithAuto?: boolean
 }
 
 type Tab = 'models' | 'skills' | 'mcp' | 'agents' | 'appearance' | 'security' | 'usage'
@@ -110,7 +112,10 @@ function toAgentSpec(a: AgentSpec) {
   }
 }
 
-function SettingsPanel({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => void }) {
+function SettingsPanel({ activeSessionId, onDirtyChange }: {
+  activeSessionId?: string
+  onDirtyChange?: (dirty: boolean) => void
+}) {
   const [cfg, setCfg] = useState<AppConfig>(emptyAppConfig)
   const [agents, setAgents] = useState<AgentSpec[]>([])
   const [dir, setDir] = useState('')
@@ -119,6 +124,8 @@ function SettingsPanel({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => 
   const [saved, setSaved] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [error, setError] = useState('')
+  const [smithBusy, setSmithBusy] = useState(false)
+  const [smithMsg, setSmithMsg] = useState('')
   const [glassAlpha, setGlassAlpha] = useState(() => loadGlass().alpha)
   const [glassBlur, setGlassBlur] = useState(() => loadGlass().blur)
   // MCP 连接诊断结果（按 server ID）
@@ -155,6 +162,7 @@ function SettingsPanel({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => 
         args: (m.args ?? []).join(', '),
         env: m.env ?? '',
       })),
+      agentSmithAuto: c.agentSmithAuto ?? false,
     }))
     ConfigService.GetConfigDir().then(setDir)
     ConfigService.GetProjectAgentDir().then(setAgentDir)
@@ -237,7 +245,15 @@ function SettingsPanel({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => 
     }
   }
 
-  const saveCurrent = () => (tab === 'agents' ? saveAgents() : saveConfig())
+  const saveCurrent = async () => {
+    if (tab === 'agents') {
+      // Agent 配置与全局开关（agentSmithAuto）在不同文件，保存时一起提交
+      await saveAgents()
+      await saveConfig()
+      return
+    }
+    await saveConfig()
+  }
 
   const saveAgents = async () => {
     setError('')
@@ -261,6 +277,40 @@ function SettingsPanel({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => 
       loadAgents()
     } catch (e) {
       setError(String(e))
+    }
+  }
+
+  // 手动触发 agent-smith：异步运行，结果通过 agent_smith 事件显示在对话事件流
+  const optimizeAgents = async () => {
+    if (!activeSessionId) return
+    setSmithBusy(true)
+    setSmithMsg('')
+    try {
+      await ChatService.OptimizeAgents(activeSessionId)
+      setSmithMsg('agent-smith 已启动；结果会显示在当前对话的事件流中。')
+    } catch (e: any) {
+      setSmithMsg(typeof e === 'string' ? e : e?.message ?? String(e))
+    } finally {
+      setSmithBusy(false)
+    }
+  }
+
+  // 撤销某个 Agent 最近一次 smith 优化（使用 .aidog/agents/.backup 最新备份）
+  const restoreAgent = async (name: string) => {
+    if (!name) return
+    setError('')
+    setSmithMsg('')
+    try {
+      const backups = await ConfigService.ListAgentBackups(name)
+      if (!backups || backups.length === 0) {
+        setSmithMsg(`「${name}」没有可撤销的备份`)
+        return
+      }
+      await ConfigService.RestoreProjectAgent(name, backups[0].path)
+      loadAgents()
+      setSmithMsg(`已撤销「${name}」上次优化`)
+    } catch (e: any) {
+      setError(typeof e === 'string' ? e : e?.message ?? String(e))
     }
   }
 
@@ -532,6 +582,16 @@ function SettingsPanel({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => 
               当前版本把定义注入主 Agent 上下文；按配置分派执行（独立上下文 / skill / MCP 工具集）在后续里程碑接入。保存后对当前会话下一轮生效。
             </p>
             {!agentDir && <p className="hint">设置工作区后即可添加项目级 Agent。</p>}
+            <div className="form-grid" style={{ marginBottom: 12 }}>
+              <Label>自动优化 Agent</Label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Switch
+                  checked={!!cfg.agentSmithAuto}
+                  onCheckedChange={v => patch({ agentSmithAuto: v })}
+                />
+                <span className="hint">任务失败/取消后自动运行 agent-smith（写配置仍需审批）</span>
+              </div>
+            </div>
             {agents.map((a, i) => (
               <div key={i} className="model-row">
                 <div style={{ flex: 1 }}>
@@ -564,6 +624,14 @@ function SettingsPanel({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => 
                   </div>
                   <div className="row-actions">
                     <Button
+                      variant="outline"
+                      size="icon-sm"
+                      title="撤销上次优化"
+                      aria-label={`撤销 ${a.name || '未命名'} 上次优化`}
+                      disabled={!a.name}
+                      onClick={() => restoreAgent(a.name)}
+                    ><Undo2 /></Button>
+                    <Button
                       variant="destructive"
                       size="icon-sm"
                       title="删除 Agent"
@@ -583,6 +651,14 @@ function SettingsPanel({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => 
                 agent_id: '', name: '', description: '', system_prompt: '', model: '',
                 tools: '', skills: '', mcp_servers: '', max_turns: 0,
               }])}><Plus className="size-3.5" /> 添加 Agent</Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={!agentDir || !activeSessionId || smithBusy}
+                title={activeSessionId ? '运行 agent-smith 优化项目 Agent' : '先在左侧选择一个线程'}
+                onClick={optimizeAgents}
+              ><Wand2 className="size-3.5" /> {smithBusy ? '优化中…' : '优化 Agent'}</Button>
+              {smithMsg && <span className="hint">{smithMsg}</span>}
             </div>
           </>
         )}

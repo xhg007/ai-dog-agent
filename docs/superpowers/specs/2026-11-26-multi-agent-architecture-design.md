@@ -1,7 +1,7 @@
 # 多 Agent 协作、Agent Runtime 与任务状态机设计
 
 日期：2026-11-26
-状态：阶段 A/B/C 已实现（2026-11-26）；阶段 D–E 未实现。实施记录见
+状态：阶段 A/B/C/D 已实现（2026-11-26）；阶段 E 未实现。实施记录见
 `docs/superpowers/plans/2026-11-26-multi-agent-runtime.md`。
 
 ## 1. 设计理念与已确认决策
@@ -40,7 +40,7 @@
 | work agent 独立上下文/工具/MCP/Skill | `tools.Catalog` + `BuildWorkAgent` | ✅ 阶段 A |
 | 主 Agent 编排/初始化 | `buildDispatchTools` 生成 `dispatch_<name>` | ✅ 阶段 A |
 | agent-to-agent 私聊 | `AgentRegistry` + `send_message`（同步、120s 超时、深度/循环限制、`agent_message` 事件） | ✅ 阶段 C |
-| agent-smith | 无 | 阶段 D |
+| agent-smith | `Smith` 运行器（主模型建议 + 审批 + 备份 + 自动开关 + 手动 RPC） | ✅ 阶段 D |
 | 配置分层（全局/项目级） | `.aidog/main.json` + `mcp_servers.json` + `skills.json`，`Effective` 合并 | ✅ 阶段 A（配置页分组留 E） |
 | 上下文压缩 | 无（会话历史全量回放） | 阶段 E |
 | 执行上限（步骤/Token/时间/工具次数/预算/重试） | `Execution` 计数 + `context.WithTimeout` + 结构化 LimitError | ✅ 阶段 A（重试沿用 ADK） |

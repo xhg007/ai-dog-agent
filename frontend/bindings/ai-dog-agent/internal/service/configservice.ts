@@ -8,7 +8,7 @@
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wailsio/runtime";
+import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Create } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -29,7 +29,9 @@ export function DeleteProjectAgent(name: string): $CancellablePromise<void> {
  * ShellWhitelist 为空时填充默认白名单，保证前端设置页展示生效值。
  */
 export function GetConfig(): $CancellablePromise<config$0.Config> {
-    return $Call.ByID(3004103843);
+    return $Call.ByID(3004103843).then(($result: any) => {
+        return $$createType0($result);
+    });
 }
 
 /**
@@ -49,29 +51,53 @@ export function GetProjectAgentDir(): $CancellablePromise<string> {
 /**
  * GetProjectAgents 返回当前项目 .aidog/agents/*.json 中的全部子 Agent 定义。
  */
-export function GetProjectAgents(): $CancellablePromise<agentspec$0.Spec[] | null> {
-    return $Call.ByID(1535670052);
+export function GetProjectAgents(): $CancellablePromise<agentspec$0.Spec[]> {
+    return $Call.ByID(1535670052).then(($result: any) => {
+        return $$createType2($result);
+    });
 }
 
 /**
  * GetProjectConfig 返回项目级配置（.aidog 目录；未设置工作区时返回空配置）。
  */
 export function GetProjectConfig(): $CancellablePromise<config$0.ProjectConfig> {
-    return $Call.ByID(3489640804);
+    return $Call.ByID(3489640804).then(($result: any) => {
+        return $$createType3($result);
+    });
 }
 
 /**
  * GetProjectMCPServers 返回项目专属 MCP Server。
  */
-export function GetProjectMCPServers(): $CancellablePromise<config$0.MCPServerConfig[] | null> {
-    return $Call.ByID(3102148854);
+export function GetProjectMCPServers(): $CancellablePromise<config$0.MCPServerConfig[]> {
+    return $Call.ByID(3102148854).then(($result: any) => {
+        return $$createType5($result);
+    });
 }
 
 /**
  * GetProjectSkills 返回项目专属 Skill。
  */
-export function GetProjectSkills(): $CancellablePromise<config$0.SkillConfig[] | null> {
-    return $Call.ByID(2623001336);
+export function GetProjectSkills(): $CancellablePromise<config$0.SkillConfig[]> {
+    return $Call.ByID(2623001336).then(($result: any) => {
+        return $$createType7($result);
+    });
+}
+
+/**
+ * ListAgentBackups 返回指定项目 Agent 的配置备份（最新在前）。
+ */
+export function ListAgentBackups(name: string): $CancellablePromise<agentspec$0.BackupInfo[]> {
+    return $Call.ByID(1041635467, name).then(($result: any) => {
+        return $$createType9($result);
+    });
+}
+
+/**
+ * RestoreProjectAgent 用指定备份恢复 Agent 配置（恢复前会备份当前配置）。
+ */
+export function RestoreProjectAgent(name: string, backupPath: string): $CancellablePromise<void> {
+    return $Call.ByID(2983811285, name, backupPath);
 }
 
 /**
@@ -98,14 +124,14 @@ export function SaveProjectConfig(pc: config$0.ProjectConfig): $CancellablePromi
 /**
  * SaveProjectMCPServers 覆盖保存项目专属 MCP Server（保留主 Agent 覆盖与 Skill）。
  */
-export function SaveProjectMCPServers(servers: config$0.MCPServerConfig[] | null): $CancellablePromise<void> {
+export function SaveProjectMCPServers(servers: config$0.MCPServerConfig[]): $CancellablePromise<void> {
     return $Call.ByID(3217961295, servers);
 }
 
 /**
  * SaveProjectSkills 覆盖保存项目专属 Skill（保留主 Agent 覆盖与 MCP）。
  */
-export function SaveProjectSkills(skills: config$0.SkillConfig[] | null): $CancellablePromise<void> {
+export function SaveProjectSkills(skills: config$0.SkillConfig[]): $CancellablePromise<void> {
     return $Call.ByID(2760452569, skills);
 }
 
@@ -116,3 +142,15 @@ export function SaveProjectSkills(skills: config$0.SkillConfig[] | null): $Cance
 export function SetActiveModel(id: string): $CancellablePromise<void> {
     return $Call.ByID(2299248964, id);
 }
+
+// Private type creation functions
+const $$createType0 = config$0.Config.createFrom;
+const $$createType1 = agentspec$0.Spec.createFrom;
+const $$createType2 = $Create.Array($$createType1);
+const $$createType3 = config$0.ProjectConfig.createFrom;
+const $$createType4 = config$0.MCPServerConfig.createFrom;
+const $$createType5 = $Create.Array($$createType4);
+const $$createType6 = config$0.SkillConfig.createFrom;
+const $$createType7 = $Create.Array($$createType6);
+const $$createType8 = agentspec$0.BackupInfo.createFrom;
+const $$createType9 = $Create.Array($$createType8);

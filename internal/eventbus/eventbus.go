@@ -25,6 +25,7 @@ const (
 	EvLLMUsage      = "llm_usage"      // LLM 调用用量与成本
 	EvModelFallback = "model_fallback" // 模型故障切换
 	EvAgentMessage  = "agent_message"  // Agent 私聊消息
+	EvAgentSmith    = "agent_smith"    // agent-smith 优化事件
 )
 
 // TaskStateData 任务状态载荷。
@@ -108,6 +109,15 @@ type AgentMessageData struct {
 	Reply    string `json:"reply,omitempty"`
 	Depth    int    `json:"depth"`
 	Error    string `json:"error,omitempty"`
+}
+
+// AgentSmithData agent-smith 运行事件载荷。
+type AgentSmithData struct {
+	TaskID string `json:"taskId,omitempty"`
+	Phase  string `json:"phase"` // started/applied/rejected/skipped/failed
+	Name   string `json:"name,omitempty"`
+	Reason string `json:"reason,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 // ApprovalRequestData 审批请求载荷。

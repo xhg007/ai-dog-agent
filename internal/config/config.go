@@ -84,6 +84,8 @@ type Config struct {
 	Skills         []SkillConfig     `json:"skills"`
 	MCPServers     []MCPServerConfig `json:"mcpServers"`
 	ShellWhitelist []string          `json:"shellWhitelist,omitempty"` // run_shell 允许的程序名（未配置时回退默认）
+	// AgentSmithAuto 任务失败/取消后自动运行 agent-smith（默认关闭）。
+	AgentSmithAuto bool `json:"agentSmithAuto,omitempty"`
 	// Project 项目级配置（运行时合并视图，不写入全局 config.json）。
 	Project *ProjectConfig `json:"-"`
 }

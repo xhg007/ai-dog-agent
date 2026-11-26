@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
 import { Events } from '@wailsio/runtime'
-import { ListTree, RotateCcw } from 'lucide-react'
+import { ListTree, RotateCcw, Wand2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { TaskService } from '../../bindings/ai-dog-agent/internal/service/index.js'
@@ -47,6 +47,7 @@ interface Props {
 export default function TaskPanel({ onOpenThread }: Props) {
   const [tasks, setTasks] = useState<Task[]>([])
   const [busy, setBusy] = useState('')
+  const [smithBusy, setSmithBusy] = useState('')
   const [msg, setMsg] = useState('')
   // 恢复前确认：恢复会把会话历史回滚到断点之前，需要用户知情
   const [pendingRecover, setPendingRecover] = useState<Task | null>(null)
@@ -111,6 +112,20 @@ export default function TaskPanel({ onOpenThread }: Props) {
     }
   }
 
+  // 对失败/取消任务运行 agent-smith（异步，结果通过 agent_smith 事件展示）
+  const optimize = async (t: Task) => {
+    setMsg('')
+    setSmithBusy(t.id)
+    try {
+      await ChatService.OptimizeAgents(t.sessionId)
+      setMsg(`agent-smith 已启动：${t.title || t.id.slice(0, 8)}（结果见对话事件流）`)
+    } catch (err: any) {
+      setMsg(typeof err === 'string' ? err : err?.message ?? String(err))
+    } finally {
+      setSmithBusy('')
+    }
+  }
+
   return (
     <div className="task-panel">
       {msg && <p className="task-hint">{msg}</p>}
@@ -149,14 +164,24 @@ export default function TaskPanel({ onOpenThread }: Props) {
                     aria-label={`查看任务事件 ${t.title || t.id.slice(0, 8)}`}
                   ><ListTree className="size-3" /> 事件</Button>
                   {['interrupted', 'cancelled', 'failed', 'rejected'].includes(t.status) && (
-                    <Button
-                      variant="outline"
-                      size="xs"
-                      disabled={busy === t.id}
-                      onClick={e => { e.stopPropagation(); setPendingRecover(t) }}
-                      title="从最后检查点恢复续跑"
-                      aria-label={`恢复任务 ${t.title || t.id.slice(0, 8)}`}
-                    ><RotateCcw className="size-3" /> 恢复</Button>
+                    <>
+                      <Button
+                        variant="outline"
+                        size="xs"
+                        disabled={busy === t.id}
+                        onClick={e => { e.stopPropagation(); setPendingRecover(t) }}
+                        title="从最后检查点恢复续跑"
+                        aria-label={`恢复任务 ${t.title || t.id.slice(0, 8)}`}
+                      ><RotateCcw className="size-3" /> 恢复</Button>
+                      <Button
+                        variant="outline"
+                        size="xs"
+                        disabled={smithBusy === t.id}
+                        onClick={e => { e.stopPropagation(); optimize(t) }}
+                        title="运行 agent-smith 优化项目 Agent"
+                        aria-label={`优化 Agent ${t.title || t.id.slice(0, 8)}`}
+                      ><Wand2 className="size-3" /> 优化</Button>
+                    </>
                   )}
                 </div>
                 {openEvents === t.id && (

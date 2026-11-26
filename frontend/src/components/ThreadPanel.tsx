@@ -201,6 +201,23 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, runningHint
             setMessages(m => [...m, { role: 'agent', content: '', agentMsg: e.data as AgentMessageData }])
           }
           break
+        case 'agent_smith': {
+          const d = e.data ?? {}
+          if (d.phase === 'started') break // 开始事件不打扰用户，结果再展示
+          const name = d.name || 'Agent'
+          let text = ''
+          if (d.phase === 'applied') {
+            text = `✓ agent-smith 已更新「${name}」${d.reason ? `：${d.reason}` : ''}`
+          } else if (d.phase === 'rejected') {
+            text = `agent-smith 的修改未通过审批${d.error ? `：${d.error}` : ''}`
+          } else if (d.phase === 'skipped') {
+            text = `agent-smith 跳过修改${d.reason ? `：${d.reason}` : ''}`
+          } else {
+            text = `agent-smith 执行失败${d.error ? `：${d.error}` : ''}`
+          }
+          setMessages(m => [...m, { role: 'system', content: text }])
+          break
+        }
         case 'chat_error':
           streamingRef.current = false
           setRunning(false)

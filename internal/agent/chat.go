@@ -41,6 +41,8 @@ type ChatService struct {
 	tasks      *task.Manager // 任务生命周期（M5；nil 时跳过任务记录，仅事件推送）
 	mcpMgr     *mcp.Manager  // 外部 MCP Server 连接（nil 时不接入 MCP 工具）
 	registry   *Registry     // work agent 私聊会话（按 session/agent 保存）
+	smith      *Smith        // agent-smith 后台优化（nil 时不触发）
+	smithSeen  sync.Map      // taskID -> 已触发（防止同一任务重复运行 smith）
 
 	mu       sync.Mutex
 	sessions map[string]*chatSession
@@ -87,6 +89,7 @@ func NewChatService(cfg *config.Manager, ws *workspace.Manager, bus *eventbus.Bu
 		tasks:      tasks,
 		mcpMgr:     mcpMgr,
 		registry:   NewRegistry(),
+		smith:      NewSmith(cfg, ws, appr, tasks, bus),
 		sessions:   make(map[string]*chatSession),
 	}
 	// 注册全局观测 handler（M5）：tasks 非 nil 时才注册，避免测试中重复注册全局 handler
@@ -451,6 +454,70 @@ func (s *ChatService) buildDispatchTools(ctx context.Context, sess *chatSession,
 	return out, infos
 }
 
+// maybeRunSmith 在任务失败/取消且自动开关开启时异步运行 smith；
+// 同一 taskID 只触发一次，避免重复消耗 token。
+func (s *ChatService) maybeRunSmith(sessionID, taskID, mainID, status string) {
+	if s.smith == nil || !s.shouldRunSmith(status, taskID) {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
+		if _, err := s.smith.Run(ctx, SmithTrigger{SessionID: sessionID, TaskID: taskID, MainID: mainID}); err != nil {
+			slog.Warn("agent-smith 自动优化失败", "task", taskID, "err", err)
+		}
+	}()
+}
+
+// shouldRunSmith 判断是否应自动触发：失败/取消状态、开关开启、同一任务未触发过。
+func (s *ChatService) shouldRunSmith(status, taskID string) bool {
+	if taskID == "" || s.cfg == nil {
+		return false
+	}
+	st := store.NormalizeStatus(status)
+	if st != store.StatusFailed && st != store.StatusCancelled {
+		return false
+	}
+	if !s.cfg.Get().AgentSmithAuto {
+		return false
+	}
+	if _, loaded := s.smithSeen.LoadOrStore(taskID, struct{}{}); loaded {
+		return false
+	}
+	return true
+}
+
+// OptimizeAgents 手动触发 agent-smith（异步）。启动前校验工作区、会话与忙碌状态。
+func (s *ChatService) OptimizeAgents(sessionID string) error {
+	if s.smith == nil {
+		return errors.New("agent-smith 不可用")
+	}
+	if s.ws == nil || !s.ws.IsSet() {
+		return workspace.ErrNoWorkspace
+	}
+	s.mu.Lock()
+	sess, ok := s.sessions[sessionID]
+	mainID := ""
+	if ok {
+		mainID = sess.agentID
+	}
+	s.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("会话不存在: %s", sessionID)
+	}
+	if s.smith.Busy(s.ws.Root()) {
+		return ErrSmithBusy
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
+		if _, err := s.smith.Run(ctx, SmithTrigger{SessionID: sessionID, MainID: mainID}); err != nil {
+			slog.Warn("agent-smith 手动优化失败", "session", sessionID, "err", err)
+		}
+	}()
+	return nil
+}
+
 // runTurn 执行一轮对话：回放持久化历史，消费事件流并转发到前端，同时落盘消息。
 // 任务状态机：正常结束 → review → completed；用户中断 → cancelled；其余错误 → failed（FR-5.2）。
 func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
@@ -464,6 +531,7 @@ func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
 				slog.Warn("任务状态落库失败", "task", taskID, "err", err)
 			}
 		}
+		s.maybeRunSmith(sessionID, taskID, sess.agentID, status)
 		s.mu.Lock()
 		sess.currentTaskID = ""
 		s.mu.Unlock()

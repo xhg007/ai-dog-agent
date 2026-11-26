@@ -257,7 +257,7 @@ function App() {
                 </Button>
               </header>
               <div className="settings-page-body">
-                <SettingsPanel onDirtyChange={setSettingsDirty} />
+                <SettingsPanel activeSessionId={activeId} onDirtyChange={setSettingsDirty} />
               </div>
             </div>
           ) : (

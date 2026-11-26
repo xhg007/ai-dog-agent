@@ -9,7 +9,7 @@
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wailsio/runtime";
+import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Create } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -19,6 +19,11 @@ import * as config$0 from "../config/models.js";
  * TestConnection 按传入配置临时连接 MCP Server，返回其工具名列表。
  * 直接接收配置（而非已保存的 ID），因此设置页可以在保存前试连。
  */
-export function TestConnection(sc: config$0.MCPServerConfig): $CancellablePromise<string[] | null> {
-    return $Call.ByID(2916440729, sc);
+export function TestConnection(sc: config$0.MCPServerConfig): $CancellablePromise<string[]> {
+    return $Call.ByID(2916440729, sc).then(($result: any) => {
+        return $$createType0($result);
+    });
 }
+
+// Private type creation functions
+const $$createType0 = $Create.Array($Create.Any);

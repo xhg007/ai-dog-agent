@@ -8,7 +8,7 @@
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wailsio/runtime";
+import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Create } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -24,8 +24,10 @@ export function Decide(id: string, approved: boolean, remember: boolean): $Cance
 /**
  * ListPending 返回当前全部待审批请求。
  */
-export function ListPending(): $CancellablePromise<eventbus$0.ApprovalRequestData[] | null> {
-    return $Call.ByID(4249401269);
+export function ListPending(): $CancellablePromise<eventbus$0.ApprovalRequestData[]> {
+    return $Call.ByID(4249401269).then(($result: any) => {
+        return $$createType1($result);
+    });
 }
 
 /**
@@ -34,3 +36,7 @@ export function ListPending(): $CancellablePromise<eventbus$0.ApprovalRequestDat
 export function RollbackFile(relPath: string): $CancellablePromise<void> {
     return $Call.ByID(2890147488, relPath);
 }
+
+// Private type creation functions
+const $$createType0 = eventbus$0.ApprovalRequestData.createFrom;
+const $$createType1 = $Create.Array($$createType0);
