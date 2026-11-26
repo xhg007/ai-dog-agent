@@ -89,7 +89,7 @@ func TestRecoverTaskIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	s.tasks.Finish("s-rt", taskID, store.StatusInterrupted, "")
+	s.tasks.Finish("s-rt", taskID, store.StatusCancelled, "")
 	if err := s.RecoverTask(taskID); err == nil {
 		t.Fatal("无断点任务应报错")
 	}

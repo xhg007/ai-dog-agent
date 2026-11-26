@@ -29,12 +29,17 @@ type decision struct {
 	remember bool
 }
 
+// StateHook 审批生命周期回调（任务状态机在等待审批时进入 BLOCKED，决策后恢复 RUNNING）。
+type StateHook func(sessionID string)
+
 // Manager 审批管理器。
 type Manager struct {
 	bus        *eventbus.Bus
 	mu         sync.Mutex
 	pending    map[string]*pendingReq
 	remembered map[string]map[string]bool // sessionID -> "tool:path" 集合
+	onWait     StateHook
+	onResume   StateHook
 }
 
 // New 创建审批管理器。
@@ -44,6 +49,22 @@ func New(bus *eventbus.Bus) *Manager {
 		pending:    make(map[string]*pendingReq),
 		remembered: make(map[string]map[string]bool),
 	}
+}
+
+// SetStateHooks 注册审批等待/恢复回调（应用启动时调用一次）。
+// 回调在锁外执行，可安全调用 task.Manager.Transition。
+func (m *Manager) SetStateHooks(onWait, onResume StateHook) {
+	m.mu.Lock()
+	m.onWait = onWait
+	m.onResume = onResume
+	m.mu.Unlock()
+}
+
+// stateHooks 返回当前钩子快照（调用方不得持锁）。
+func (m *Manager) stateHooks() (wait, resume StateHook) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.onWait, m.onResume
 }
 
 // Request 请求审批：推送事件给前端并阻塞等待决策。
@@ -75,6 +96,9 @@ func (m *Manager) RequestContext(ctx context.Context, sessionID, tool, path, pre
 	m.bus.Emit(eventbus.Event{
 		Type: eventbus.EvApprovalRequest, SessionID: sessionID, Data: pr.req,
 	})
+	if wait, _ := m.stateHooks(); wait != nil {
+		wait(sessionID)
+	}
 
 	var dec decision
 	select {
@@ -87,6 +111,9 @@ func (m *Manager) RequestContext(ctx context.Context, sessionID, tool, path, pre
 			Type: eventbus.EvApprovalDecided, SessionID: sessionID,
 			Data: eventbus.ApprovalDecidedData{ID: id, Approved: false},
 		})
+		if _, resume := m.stateHooks(); resume != nil {
+			resume(sessionID)
+		}
 		return false, ctx.Err()
 	}
 
@@ -104,6 +131,9 @@ func (m *Manager) RequestContext(ctx context.Context, sessionID, tool, path, pre
 		Type: eventbus.EvApprovalDecided, SessionID: sessionID,
 		Data: eventbus.ApprovalDecidedData{ID: id, Approved: dec.approved},
 	})
+	if _, resume := m.stateHooks(); resume != nil {
+		resume(sessionID)
+	}
 
 	if !dec.approved {
 		return false, fmt.Errorf("%w: %s %s", ErrDenied, tool, path)

@@ -37,12 +37,42 @@ func New(s store.Store, w *store.AsyncWriter, bus *eventbus.Bus) *Manager {
 	}
 }
 
-// Start 创建运行中任务：落库 + 推送 task_state + 事件落表。返回任务 ID。
+// transitions 合法状态迁移表（设计文档 §3.11）。
+var transitions = map[string]map[string]bool{
+	store.StatusPending:   {store.StatusReady: true, store.StatusCancelled: true},
+	store.StatusReady:     {store.StatusAssigned: true, store.StatusCancelled: true},
+	store.StatusAssigned:  {store.StatusRunning: true, store.StatusCancelled: true},
+	store.StatusRunning:   {store.StatusBlocked: true, store.StatusReview: true, store.StatusCancelled: true, store.StatusFailed: true},
+	store.StatusBlocked:   {store.StatusRunning: true, store.StatusCancelled: true, store.StatusFailed: true},
+	store.StatusReview:    {store.StatusCompleted: true, store.StatusRejected: true, store.StatusRunning: true, store.StatusCancelled: true, store.StatusFailed: true},
+	store.StatusRejected:  {store.StatusRunning: true, store.StatusFailed: true, store.StatusCancelled: true},
+	store.StatusCompleted: {},
+	store.StatusCancelled: {},
+	store.StatusFailed:    {},
+}
+
+// CanTransition 判断状态迁移是否合法（旧状态先归一）。
+func CanTransition(from, to string) bool {
+	return transitions[store.NormalizeStatus(from)][to]
+}
+
+// Start 创建任务并完成内联调度：PENDING → READY → ASSIGNED → RUNNING。
+// 当前没有独立调度器，中间状态只做迁移合法性校验，持久化与事件只记录最终 RUNNING。
 func (m *Manager) Start(sessionID, title string) (string, error) {
 	id := uuid.NewString()
-	t := store.Task{ID: id, SessionID: sessionID, Title: title, Status: store.StatusRunning}
+	t := store.Task{ID: id, SessionID: sessionID, Title: title, Status: store.StatusPending}
 	if err := m.w.Store().CreateTask(t); err != nil {
 		return "", fmt.Errorf("创建任务失败: %w", err)
+	}
+	status := store.StatusPending
+	for _, next := range []string{store.StatusReady, store.StatusAssigned, store.StatusRunning} {
+		if !CanTransition(status, next) {
+			return "", fmt.Errorf("任务调度状态迁移非法: %s -> %s", status, next)
+		}
+		status = next
+	}
+	if err := m.w.Store().UpdateTaskStatus(id, store.StatusRunning, ""); err != nil {
+		return "", fmt.Errorf("更新任务状态失败: %w", err)
 	}
 	m.mu.Lock()
 	m.current[sessionID] = id
@@ -55,24 +85,79 @@ func (m *Manager) Start(sessionID, title string) (string, error) {
 	return id, nil
 }
 
-// Finish 结束任务：更新状态 + 推送 task_state + 事件落表，并清除会话当前任务。
+// Finish 结束任务：正常完成经 REVIEW → COMPLETED；失败/取消从 RUNNING/BLOCKED 直接进入终态。
+// 已是终态时幂等返回（重复结束不报错）。
 func (m *Manager) Finish(sessionID, taskID, status, errMsg string) error {
+	target := store.NormalizeStatus(status)
+	cur, err := m.store.GetTask(taskID)
+	if err != nil {
+		return fmt.Errorf("查询任务状态失败: %w", err)
+	}
+	from := store.NormalizeStatus(cur.Status)
+	if store.IsTerminal(from) {
+		m.clearCurrent(sessionID, taskID)
+		return nil
+	}
+	// 正常完成先进入 REVIEW（待校验），再由调用方/校验逻辑推进 COMPLETED。
+	if target == store.StatusCompleted && from == store.StatusRunning {
+		if err := m.Transition(sessionID, taskID, store.StatusReview, ""); err != nil {
+			return err
+		}
+		from = store.StatusReview
+	}
+	if !CanTransition(from, target) {
+		return fmt.Errorf("非法任务状态迁移: %s -> %s", from, target)
+	}
+	if err := m.updateStatus(sessionID, taskID, target, errMsg); err != nil {
+		return err
+	}
+	m.clearCurrent(sessionID, taskID)
+	return nil
+}
+
+// Transition 按状态机迁移任务（审批阻塞/恢复等使用）。
+func (m *Manager) Transition(sessionID, taskID, to, errMsg string) error {
+	target := store.NormalizeStatus(to)
+	cur, err := m.store.GetTask(taskID)
+	if err != nil {
+		return fmt.Errorf("查询任务状态失败: %w", err)
+	}
+	from := store.NormalizeStatus(cur.Status)
+	if from == target {
+		return nil
+	}
+	if !CanTransition(from, target) {
+		return fmt.Errorf("非法任务状态迁移: %s -> %s", from, target)
+	}
+	if err := m.updateStatus(sessionID, taskID, target, errMsg); err != nil {
+		return err
+	}
+	if store.IsTerminal(target) {
+		m.clearCurrent(sessionID, taskID)
+	}
+	return nil
+}
+
+// updateStatus 落库 + 推送 + 事件落表。
+func (m *Manager) updateStatus(sessionID, taskID, status, errMsg string) error {
 	if err := m.w.Store().UpdateTaskStatus(taskID, status, errMsg); err != nil {
 		return fmt.Errorf("更新任务状态失败: %w", err)
 	}
-	m.mu.Lock()
-	if m.current[sessionID] == taskID {
-		delete(m.current, sessionID)
-	}
-	// 任务已终结：检查点序号计数器不再需要（否则每个任务留一条，长期累积）。
-	// 迟到的 checkpoint 会重新从 1 开始，对已结束任务无影响。
-	delete(m.seq, taskID)
-	m.mu.Unlock()
 	m.pushState(sessionID, taskID, "", status, errMsg)
 	m.appendEvent(taskID, eventbus.EvTaskState, eventbus.TaskStateData{
 		TaskID: taskID, Status: status, Error: errMsg,
 	})
 	return nil
+}
+
+// clearCurrent 清理会话当前任务与检查点计数器。
+func (m *Manager) clearCurrent(sessionID, taskID string) {
+	m.mu.Lock()
+	if m.current[sessionID] == taskID {
+		delete(m.current, sessionID)
+	}
+	delete(m.seq, taskID)
+	m.mu.Unlock()
 }
 
 // RunningTaskID 返回会话当前运行中的任务 ID（无则空串）。

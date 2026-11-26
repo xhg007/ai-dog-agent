@@ -4,20 +4,46 @@ package store
 
 import "time"
 
-// 任务状态（FR-5.2）。
+// 任务状态机（设计文档 §3.11）。值保持小写以兼容旧数据与前端展示。
 const (
-	StatusRunning     = "running"
-	StatusCompleted   = "completed"
-	StatusFailed      = "failed"
+	StatusPending   = "pending"   // 已创建，等待调度
+	StatusReady     = "ready"     // 依赖/上下文就绪
+	StatusAssigned  = "assigned"  // 已分配给某 Agent
+	StatusRunning   = "running"   // 执行中
+	StatusBlocked   = "blocked"   // 等待审批或外部输入
+	StatusReview    = "review"    // 完成，待校验
+	StatusRejected  = "rejected"  // 校验失败/被拒
+	StatusCompleted = "completed" // 完成（终态）
+	StatusCancelled = "cancelled" // 用户取消（终态）
+	StatusFailed    = "failed"    // 不可重试失败（终态）
+
+	// StatusInterrupted 旧版中断状态；读取时归一为 StatusCancelled。
 	StatusInterrupted = "interrupted"
 )
+
+// NormalizeStatus 把旧状态映射到新状态机。
+func NormalizeStatus(status string) string {
+	if status == StatusInterrupted {
+		return StatusCancelled
+	}
+	return status
+}
+
+// IsTerminal 是否为终态（旧 interrupted 也算终态）。
+func IsTerminal(status string) bool {
+	switch NormalizeStatus(status) {
+	case StatusCompleted, StatusCancelled, StatusFailed:
+		return true
+	}
+	return false
+}
 
 // Task 一次用户消息触发的执行轮次。
 type Task struct {
 	ID        string    `json:"id"`        // UUID，由调用方生成
 	SessionID string    `json:"sessionId"` // 关联线程，前端跳转用
 	Title     string    `json:"title"`
-	Status    string    `json:"status"` // StatusRunning/StatusCompleted/StatusFailed/StatusInterrupted
+	Status    string    `json:"status"` // 见状态机常量
 	Error     string    `json:"error,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	// FinishedAt 终态时间；运行中为 nil（JSON 省略，避免前端看到零值时间）。

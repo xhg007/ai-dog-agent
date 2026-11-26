@@ -1,7 +1,7 @@
 # 多 Agent 协作、Agent Runtime 与任务状态机设计
 
 日期：2026-11-26
-状态：阶段 A 已实现（2026-11-26）；阶段 B–E 未实现。实施记录见
+状态：阶段 A/B 已实现（2026-11-26）；阶段 C–E 未实现。实施记录见
 `docs/superpowers/plans/2026-11-26-multi-agent-runtime.md`。
 
 ## 1. 设计理念与已确认决策
@@ -44,7 +44,7 @@
 | 配置分层（全局/项目级） | `.aidog/main.json` + `mcp_servers.json` + `skills.json`，`Effective` 合并 | ✅ 阶段 A（配置页分组留 E） |
 | 上下文压缩 | 无（会话历史全量回放） | 阶段 E |
 | 执行上限（步骤/Token/时间/工具次数/预算/重试） | `Execution` 计数 + `context.WithTimeout` + 结构化 LimitError | ✅ 阶段 A（重试沿用 ADK） |
-| 任务状态机 | `running/completed/failed/interrupted` | 阶段 B |
+| 任务状态机 | PENDING/READY/ASSIGNED/RUNNING/BLOCKED/REVIEW/REJECTED/COMPLETED/CANCELLED/FAILED + `Transition` | ✅ 阶段 B |
 
 附带问题（已修复）：原 `internal/agent/instruction.go` 要求分派“项目级子 Agent”但只有
 `dispatch_explorer`；现已改为 `internal/agent/prompts.go` 模板化提示词，并按实际构建成功的

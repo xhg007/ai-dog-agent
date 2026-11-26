@@ -159,6 +159,11 @@ func (s *DuckDBStore) migrate() error {
 		`ALTER TABLE token_usage ADD COLUMN model_id VARCHAR NOT NULL DEFAULT ''`); err != nil {
 		return fmt.Errorf("迁移 token_usage.model_id 失败: %w", err)
 	}
+	// 旧任务状态迁移：interrupted → cancelled（阶段 B 终态；幂等）。
+	if _, err := conn.ExecContext(ctx,
+		`UPDATE tasks SET status = 'cancelled' WHERE status = 'interrupted'`); err != nil {
+		return fmt.Errorf("迁移旧任务状态失败: %w", err)
+	}
 	return nil
 }
 
@@ -464,11 +469,7 @@ func (s *DuckDBStore) DailyUsage(days int) ([]DailyUsageRow, error) {
 func (s *DuckDBStore) Close() error { return s.db.Close() }
 
 func isTerminal(status string) bool {
-	switch status {
-	case StatusCompleted, StatusFailed, StatusInterrupted:
-		return true
-	}
-	return false
+	return IsTerminal(status)
 }
 
 // nullableTimePtr 把可空时间转换为 SQL 参数（nil 写入 NULL）。

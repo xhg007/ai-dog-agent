@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-26-multi-agent-architecture-design.md` §3.1–3.6、§6 阶段 A。
 
-**Status:** 阶段 A 已完成（2026-11-26）；阶段 B–E 未开始。
+**Status:** 阶段 A/B 已完成（2026-11-26）；阶段 C–E 未开始。
 
 ## Global Constraints
 
@@ -105,11 +105,14 @@
 
 ## 阶段 B–E 待办
 
-### 阶段 B：任务状态机
+### 阶段 B：任务状态机（已完成 2026-11-26）
 
-- 扩展 `store` 状态：PENDING/READY/ASSIGNED/RUNNING/BLOCKED/REVIEW/REJECTED/COMPLETED/CANCELLED/FAILED。
-- `Transition` 合法迁移表与旧数据映射（running→RUNNING、interrupted→CANCELLED、failed→FAILED/REJECTED）。
-- 审批请求 → BLOCKED，审批结果 → RUNNING/REJECTED；TaskPanel 新状态展示。
+- [x] `store` 状态扩展为 PENDING/READY/ASSIGNED/RUNNING/BLOCKED/REVIEW/REJECTED/COMPLETED/CANCELLED/FAILED，新增 `NormalizeStatus`/`IsTerminal`。
+- [x] `task.Manager` 合法迁移表与 `Transition`；`Start` 内联 PENDING→READY→ASSIGNED→RUNNING；正常完成经 REVIEW→COMPLETED。
+- [x] 旧库 `interrupted` 启动时迁移为 `cancelled`（幂等）。
+- [x] 审批请求 → BLOCKED、决策/取消 → RUNNING（approval 状态钩子，锁外执行）。
+- [x] TaskPanel 覆盖全部状态，恢复按钮扩展到 cancelled/rejected。
+- [x] 测试：迁移表、非法迁移、BLOCKED 往返、终态幂等、旧库迁移、审批钩子。
 
 ### 阶段 C：agent-to-agent 私聊
 

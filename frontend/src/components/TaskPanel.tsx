@@ -12,10 +12,17 @@ import ConfirmDialog from './ConfirmDialog'
 export type TaskInfo = Task
 
 const statusMeta: Record<string, { label: string; cls: string }> = {
+  pending: { label: '待调度', cls: 'stop' },
+  ready: { label: '就绪', cls: 'stop' },
+  assigned: { label: '已分配', cls: 'stop' },
   running: { label: '运行', cls: 'running' },
+  blocked: { label: '等待审批', cls: 'running' },
+  review: { label: '校验中', cls: 'running' },
+  rejected: { label: '已拒绝', cls: 'fail' },
   completed: { label: '完成', cls: 'done' },
+  cancelled: { label: '已取消', cls: 'stop' },
   failed: { label: '失败', cls: 'fail' },
-  interrupted: { label: '中断', cls: 'stop' },
+  interrupted: { label: '中断', cls: 'stop' }, // 旧数据兼容
 }
 
 function timeLabel(iso?: string | null): string {
@@ -141,7 +148,7 @@ export default function TaskPanel({ onOpenThread }: Props) {
                     title="查看任务事件流"
                     aria-label={`查看任务事件 ${t.title || t.id.slice(0, 8)}`}
                   ><ListTree className="size-3" /> 事件</Button>
-                  {(t.status === 'interrupted' || t.status === 'failed') && (
+                  {['interrupted', 'cancelled', 'failed', 'rejected'].includes(t.status) && (
                     <Button
                       variant="outline"
                       size="xs"

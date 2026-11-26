@@ -106,8 +106,8 @@ func TestAppendTokenUsageAndEmit(t *testing.T) {
 	m.w.Close()
 
 	evs, _ := st.TaskEvents(id, 100)
-	if len(evs) != 3 {
-		t.Fatalf("事件数应为 3（2×task_state + 1×llm_usage）: %+v", evs)
+	if len(evs) != 4 {
+		t.Fatalf("事件数应为 4（3×task_state: running/review/completed + 1×llm_usage）: %+v", evs)
 	}
 	rows, _ := st.DailyUsage(30)
 	if len(rows) != 1 || rows[0].Calls != 1 || rows[0].InputTokens != 1000 || rows[0].CostTotal < 0.029 {

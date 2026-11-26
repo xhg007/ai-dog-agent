@@ -96,6 +96,26 @@ func NewChatService(cfg *config.Manager, ws *workspace.Manager, bus *eventbus.Bu
 			return "", 0, 0
 		})
 	}
+	// 审批等待/恢复驱动任务状态机：等待决策时 BLOCKED，决策后回到 RUNNING。
+	// 审批被拒也回到 RUNNING，由工具错误驱动后续终态（避免任务卡在 BLOCKED）。
+	if tasks != nil && appr != nil {
+		appr.SetStateHooks(
+			func(sessionID string) {
+				if id := tasks.RunningTaskID(sessionID); id != "" {
+					if err := tasks.Transition(sessionID, id, store.StatusBlocked, ""); err != nil {
+						slog.Warn("任务进入 BLOCKED 失败", "task", id, "err", err)
+					}
+				}
+			},
+			func(sessionID string) {
+				if id := tasks.RunningTaskID(sessionID); id != "" {
+					if err := tasks.Transition(sessionID, id, store.StatusRunning, ""); err != nil {
+						slog.Warn("任务恢复 RUNNING 失败", "task", id, "err", err)
+					}
+				}
+			},
+		)
+	}
 	if sessionDir != "" {
 		s.store = newSessionStore(sessionDir)
 		if err := s.restoreSessions(); err != nil {
@@ -411,7 +431,7 @@ func (s *ChatService) buildDispatchTools(ctx context.Context, sess *chatSession,
 }
 
 // runTurn 执行一轮对话：回放持久化历史，消费事件流并转发到前端，同时落盘消息。
-// 任务状态机：正常结束 → completed；中断 → interrupted；其余错误 → failed（FR-5.2）。
+// 任务状态机：正常结束 → review → completed；用户中断 → cancelled；其余错误 → failed（FR-5.2）。
 func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
 	bus := s.bus
 	sessionID := sess.id
@@ -472,7 +492,7 @@ func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
 		if ev.Err != nil {
 			if ctx.Err() != nil {
 				emitError("已中断")
-				finishTask(store.StatusInterrupted, "用户中断")
+				finishTask(store.StatusCancelled, "用户中断")
 				return
 			}
 			if terr := exec.Termination(execCtx); terr != nil {
@@ -510,7 +530,7 @@ func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
 				if err != nil {
 					if ctx.Err() != nil {
 						emitError("已中断")
-						finishTask(store.StatusInterrupted, "用户中断")
+						finishTask(store.StatusCancelled, "用户中断")
 						return
 					}
 					if terr := exec.Termination(execCtx); terr != nil {
@@ -540,7 +560,7 @@ func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
 	// 中断可能表现为正常结束（无错误）：按 ctx 状态定终态
 	if ctx.Err() != nil {
 		emitError("已中断")
-		finishTask(store.StatusInterrupted, "用户中断")
+		finishTask(store.StatusCancelled, "用户中断")
 		return
 	}
 	// 超时/超限也可能表现为迭代器正常结束：以执行计数器的终止原因为准
