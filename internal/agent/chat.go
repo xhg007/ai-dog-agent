@@ -299,6 +299,12 @@ func (s *ChatService) initAgentLocked(sess *chatSession) error {
 	}
 
 	prompt := s.buildPromptData()
+	// 项目 Agent 动态分派工具（每个 Spec 一个 dispatch_<name>）
+	var dispatchTools []tool.BaseTool
+	if s.ws.IsSet() {
+		dispatchTools, prompt.Dispatches = s.buildDispatchTools(ctx, sess, prompt.Agents)
+		prompt.Dispatches = ensureBuiltinExplorer(prompt.Dispatches)
+	}
 	// 项目级预算覆盖主 Agent 默认上限；无项目配置时用主 Agent 默认值。
 	eff := s.cfg.Effective(s.ws.Root())
 	var budget agentspec.Budget
@@ -306,19 +312,20 @@ func (s *ChatService) initAgentLocked(sess *chatSession) error {
 		budget = eff.Project.Main.Budget
 	}
 	limits := MainLimits(budget)
-	// 外部 MCP 工具：启用的 server 懒连接并包装；单个 server 失败只跳过（不阻塞会话）
-	var mcpTools []tool.BaseTool
+	// 外部 MCP 工具 + 项目 Agent 分派工具：单个 MCP server 失败只跳过（不阻塞会话）
+	var extraTools []tool.BaseTool
 	if s.mcpMgr != nil {
-		mcpTools = s.mcpMgr.Tools(ctx, s.cfg.Get().MCPServers, s.ws.Root(), sess.id)
+		extraTools = s.mcpMgr.Tools(ctx, s.cfg.Get().MCPServers, s.ws.Root(), sess.id)
 	}
+	extraTools = append(extraTools, dispatchTools...)
 	var ag adk.Agent
 	if s.ws.IsSet() {
 		// workspace 已设置：主 Agent 携带 explorer 分派工具 + 写操作审批工具 + 执行工具 + MCP 工具
 		ag, err = BuildOrchestrator(ctx, s.ws, cm, s.appr, s.backupRoot, sess.id,
-			s.cfg.ShellWhitelist(), prompt, mcpTools, limits)
+			s.cfg.ShellWhitelist(), prompt, extraTools, limits)
 	} else {
 		// 未设置 workspace：纯对话模式（仍可携带 MCP 工具）
-		ag, err = newPlainOrchestrator(ctx, cm, prompt, mcpTools, limits)
+		ag, err = newPlainOrchestrator(ctx, cm, prompt, extraTools, limits)
 	}
 	if err != nil {
 		return fmt.Errorf("构建 Agent 失败: %w", err)
@@ -360,6 +367,47 @@ func (s *ChatService) buildPromptData() PromptData {
 		}
 	}
 	return data
+}
+
+// buildDispatchTools 为每个项目 Agent 构建独立 work agent 与 dispatch 工具。
+// 工具名重复或构建失败的 Agent 跳过分派并记录警告，不阻塞会话。
+func (s *ChatService) buildDispatchTools(ctx context.Context, sess *chatSession,
+	specs []agentspec.Spec) ([]tool.BaseTool, []DispatchInfo) {
+	if len(specs) == 0 {
+		return nil, nil
+	}
+	deps := WorkAgentDeps{
+		Config: s.cfg, Workspace: s.ws, Approval: s.appr,
+		BackupDir: s.backupRoot, SessionID: sess.id,
+		Whitelist: s.cfg.ShellWhitelist(), MCP: s.mcpMgr,
+	}
+	var out []tool.BaseTool
+	var infos []DispatchInfo
+	seen := make(map[string]bool, len(specs))
+	for _, spec := range specs {
+		if strings.TrimSpace(spec.AgentID) == "" {
+			slog.Warn("跳过缺少 agent_id 的项目 Agent", "name", spec.Name)
+			continue
+		}
+		agentID := spec.AgentID
+		notify := func(from, to, reason string) {
+			s.bus.Emit(eventbus.Event{Type: eventbus.EvModelFallback, SessionID: sess.id,
+				Data: eventbus.ModelFallbackData{AgentID: agentID, From: from, To: to, Reason: reason}})
+		}
+		wa, err := BuildWorkAgent(ctx, deps, spec, sess.agentID, notify)
+		if err != nil {
+			slog.Warn("构建 work agent 失败，跳过分派", "agent", spec.Name, "err", err)
+			continue
+		}
+		if seen[wa.ToolName] {
+			slog.Warn("dispatch 工具名重复，跳过", "tool", wa.ToolName, "agent", spec.Name)
+			continue
+		}
+		seen[wa.ToolName] = true
+		out = append(out, adk.NewAgentTool(ctx, wa.Agent))
+		infos = append(infos, DispatchInfo{Name: wa.ToolName, Description: spec.Description})
+	}
+	return out, infos
 }
 
 // runTurn 执行一轮对话：回放持久化历史，消费事件流并转发到前端，同时落盘消息。

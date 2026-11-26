@@ -119,6 +119,9 @@ func readExcerpt(root, name string, limit int) string {
 	return string(data)
 }
 
+// BuiltinExplorerTool 内置 explorer 的分派工具名（与 DispatchToolName 规则一致）。
+const BuiltinExplorerTool = "dispatch_explorer"
+
 // BuildExplorer 构建 explorer 子 Agent（独立上下文，只读工具集 + 项目摘要工具）。
 func BuildExplorer(ctx context.Context, ws *workspace.Manager, cm model.BaseChatModel) (adk.Agent, error) {
 	toolList := tools.ReadOnlyToolset(ws)
@@ -140,7 +143,7 @@ func BuildExplorer(ctx context.Context, ws *workspace.Manager, cm model.BaseChat
 	}
 
 	return adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
-		Name:        "explorer",
+		Name:        "dispatch_explorer", // 作为 AgentTool 时即 dispatch 工具名
 		Description: "项目探索子 Agent：分析目录结构、模块依赖、入口、符号与引用关系（只读）",
 		Instruction: instruction,
 		Model:       cm,
@@ -156,12 +159,15 @@ func BuildExplorer(ctx context.Context, ws *workspace.Manager, cm model.BaseChat
 func OrchestratorTools(ctx context.Context, ws *workspace.Manager, cm model.BaseChatModel,
 	appr *approval.Manager, backupRoot, sessionID string, whitelist []string,
 	extraTools []tool.BaseTool) ([]tool.BaseTool, error) {
-	explorer, err := BuildExplorer(ctx, ws, cm)
-	if err != nil {
-		return nil, fmt.Errorf("构建 explorer 子 Agent 失败: %w", err)
+	var toolList []tool.BaseTool
+	// 项目配置可覆盖内置 explorer：extraTools 已含 dispatch_explorer 时不再添加内置。
+	if !hasToolNamed(ctx, extraTools, BuiltinExplorerTool) {
+		explorer, err := BuildExplorer(ctx, ws, cm)
+		if err != nil {
+			return nil, fmt.Errorf("构建 explorer 子 Agent 失败: %w", err)
+		}
+		toolList = append(toolList, adk.NewAgentTool(ctx, explorer))
 	}
-	dispatchTool := adk.NewAgentTool(ctx, explorer)
-	toolList := []tool.BaseTool{dispatchTool}
 	// 写操作工具（write_file / edit_file）：经审批门 + 自动备份
 	if appr != nil {
 		toolList = append(toolList, tools.WriteToolset(ws, backupRoot, appr, sessionID)...)
@@ -240,6 +246,16 @@ func newPlainOrchestrator(ctx context.Context, cm model.BaseChatModel,
 		}
 	}
 	return adk.NewChatModelAgent(ctx, cfg)
+}
+
+// hasToolNamed 判断工具列表中是否已有指定名称（避免同名分派工具重复注册）。
+func hasToolNamed(ctx context.Context, list []tool.BaseTool, name string) bool {
+	for _, t := range list {
+		if info, err := t.Info(ctx); err == nil && info.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // retryConfig 模型调用限流重试（参考 DeepSeek 限流：429 并发超限，

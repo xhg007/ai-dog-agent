@@ -27,16 +27,14 @@ func TestRenderOrchestrator(t *testing.T) {
 			{"Name": "go-review", "Description": "审查", "Prompt": "只读"},
 		},
 		"MCPServers": []map[string]any{{"Name": "local-fs"}},
-		"Agents": []map[string]any{{
-			"Name": "coder", "Description": "写代码",
-			"Tools": []string{"read_file"}, "Skills": []string{"go-review"},
-			"MCPServers": []string{"local-fs"},
+		"Dispatches": []map[string]any{{
+			"Name": "dispatch_coder", "Description": "写代码",
 		}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"主 Agent", "当前项目", "go-review", "local-fs", "coder", "read_file"} {
+	for _, want := range []string{"主 Agent", "当前项目", "go-review", "local-fs", "dispatch_coder", "写代码"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("渲染结果缺少 %q:\n%s", want, out)
 		}

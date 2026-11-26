@@ -15,6 +15,26 @@ type PromptData struct {
 	Skills         []config.SkillConfig
 	MCPServers     []config.MCPServerConfig
 	Agents         []agentspec.Spec
+	Dispatches     []DispatchInfo // 实际可用的 dispatch 工具（与工具集保持一致）
+}
+
+// DispatchInfo 一个可用的分派工具（名称与描述用于提示词）。
+type DispatchInfo struct {
+	Name        string
+	Description string
+}
+
+// ensureBuiltinExplorer 把内置 explorer 列入可用分派工具；项目配置已覆盖同名工具时不重复。
+func ensureBuiltinExplorer(list []DispatchInfo) []DispatchInfo {
+	for _, d := range list {
+		if d.Name == BuiltinExplorerTool {
+			return list
+		}
+	}
+	return append([]DispatchInfo{{
+		Name:        BuiltinExplorerTool,
+		Description: "项目探索子 Agent（内置，只读）：分析目录结构、依赖、入口与符号",
+	}}, list...)
 }
 
 // renderOrchestratorPrompt 渲染主 Agent 系统提示词。

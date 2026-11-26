@@ -111,7 +111,7 @@ func TestBuildExplorerAgent(t *testing.T) {
 	if ag == nil {
 		t.Fatal("explorer agent 为空")
 	}
-	if ag.Name(context.Background()) != "explorer" {
+	if ag.Name(context.Background()) != BuiltinExplorerTool {
 		t.Fatalf("explorer 名称不符: %s", ag.Name(context.Background()))
 	}
 }
