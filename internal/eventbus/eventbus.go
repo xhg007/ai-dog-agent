@@ -24,6 +24,7 @@ const (
 	EvToolCall      = "tool_call"      // 工具调用开始（含参数摘要）
 	EvLLMUsage      = "llm_usage"      // LLM 调用用量与成本
 	EvModelFallback = "model_fallback" // 模型故障切换
+	EvAgentMessage  = "agent_message"  // Agent 私聊消息
 )
 
 // TaskStateData 任务状态载荷。
@@ -95,6 +96,18 @@ type ModelFallbackData struct {
 	From    string `json:"from"`
 	To      string `json:"to"`
 	Reason  string `json:"reason"`
+}
+
+// AgentMessageData Agent 私聊消息载荷（事件流展示来源/目标与结果）。
+type AgentMessageData struct {
+	From     string `json:"from"`
+	FromName string `json:"fromName,omitempty"`
+	To       string `json:"to"`
+	ToName   string `json:"toName,omitempty"`
+	Content  string `json:"content"` // 请求内容
+	Reply    string `json:"reply,omitempty"`
+	Depth    int    `json:"depth"`
+	Error    string `json:"error,omitempty"`
 }
 
 // ApprovalRequestData 审批请求载荷。

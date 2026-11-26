@@ -19,6 +19,7 @@ import (
 	"ai-dog-agent/internal/agentspec"
 	"ai-dog-agent/internal/approval"
 	"ai-dog-agent/internal/config"
+	"ai-dog-agent/internal/eventbus"
 	"ai-dog-agent/internal/llm"
 	"ai-dog-agent/internal/mcp"
 	"ai-dog-agent/internal/tools"
@@ -34,6 +35,8 @@ type WorkAgentDeps struct {
 	SessionID string
 	Whitelist []string
 	MCP       *mcp.Manager
+	Registry  *Registry     // 私聊注册表；nil 时不注入 send_message
+	Bus       *eventbus.Bus // 私聊事件推送；nil 时仍可调用但无前端事件
 }
 
 // WorkAgent 构建结果：Agent 与运行配置（用量归因/上限）。
@@ -72,6 +75,14 @@ func BuildWorkAgent(ctx context.Context, deps WorkAgentDeps, spec agentspec.Spec
 	}, spec.Tools)
 	if err != nil {
 		return nil, fmt.Errorf("构建 work agent %q 工具集失败: %w", spec.Name, err)
+	}
+	// 私聊工具：work agent 也可向同会话的其他 work agent 发送消息。
+	if deps.Registry != nil {
+		msgTool, err := SendMessageTool(deps.Registry, deps.Bus, deps.SessionID, spec.AgentID, spec.Name)
+		if err != nil {
+			return nil, fmt.Errorf("构建 work agent %q 的 send_message 工具失败: %w", spec.Name, err)
+		}
+		toolList = append(toolList, msgTool)
 	}
 
 	// MCP 集合按 Spec 声明过滤：未声明则完全不暴露外部 MCP 工具。

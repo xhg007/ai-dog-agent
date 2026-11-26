@@ -582,6 +582,66 @@ body {
   word-break: break-word;
 }
 
+/* Agent 私聊卡片（阶段 C）：可折叠，错误态高亮 */
+.agent-msg {
+  align-self: stretch;
+  margin: 2px 0;
+  background: #111111;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.agent-msg.open { background: #141414; }
+.agent-msg.error { border-color: rgba(248, 81, 73, 0.55); }
+.agent-msg-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 7px 10px;
+  background: none;
+  border: 0;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.agent-msg-head:hover { background: rgba(255, 255, 255, 0.035); }
+.agent-msg-icon { display: inline-flex; color: var(--text-faint); }
+.agent-msg-from { font-weight: 600; }
+.agent-msg-to { font-weight: 600; color: var(--link); }
+.agent-msg-depth { font-size: 10px; }
+.agent-msg-flag { color: var(--red); font-size: 11px; }
+.agent-msg-body { padding: 0 10px 10px; }
+.agent-msg-label {
+  margin: 6px 0 4px;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.agent-msg-text {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.agent-msg-error {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(248, 81, 73, 0.12);
+  color: var(--red);
+  font-size: 12px;
+}
+
 /* 执行步骤（Codex 风格：可折叠，无边框） */
 .step-card {
   align-self: stretch;

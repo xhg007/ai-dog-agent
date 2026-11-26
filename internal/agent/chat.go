@@ -40,6 +40,7 @@ type ChatService struct {
 	store      *sessionStore // 会话持久化（一个会话一个 JSON 文件）
 	tasks      *task.Manager // 任务生命周期（M5；nil 时跳过任务记录，仅事件推送）
 	mcpMgr     *mcp.Manager  // 外部 MCP Server 连接（nil 时不接入 MCP 工具）
+	registry   *Registry     // work agent 私聊会话（按 session/agent 保存）
 
 	mu       sync.Mutex
 	sessions map[string]*chatSession
@@ -85,6 +86,7 @@ func NewChatService(cfg *config.Manager, ws *workspace.Manager, bus *eventbus.Bu
 		backupRoot: backupRoot,
 		tasks:      tasks,
 		mcpMgr:     mcpMgr,
+		registry:   NewRegistry(),
 		sessions:   make(map[string]*chatSession),
 	}
 	// 注册全局观测 handler（M5）：tasks 非 nil 时才注册，避免测试中重复注册全局 handler
@@ -172,6 +174,9 @@ func (s *ChatService) DeleteSession(sessionID string) bool {
 		s.appr.ForgetSession(sessionID)
 	}
 	delete(s.sessions, sessionID)
+	if s.registry != nil {
+		s.registry.RemoveSession(sessionID) // 释放该会话的 work agent 私聊会话与历史
+	}
 	if s.store != nil {
 		if err := s.store.delete(sessionID); err != nil {
 			slog.Warn("删除会话文件失败", "session", sessionID, "err", err)
@@ -228,6 +233,10 @@ func (s *ChatService) SendMessage(sessionID string, content string) error {
 	if sess.agent != nil && s.configChanged(sess) {
 		sess.agent = nil
 		sess.runner = nil
+		// 配置变更：清空该会话的 work agent 私聊会话，稍后按新配置重新注册
+		if s.registry != nil {
+			s.registry.RemoveSession(sess.id)
+		}
 	}
 	if sess.agent == nil {
 		if err := s.initAgentLocked(sess); err != nil {
@@ -338,6 +347,14 @@ func (s *ChatService) initAgentLocked(sess *chatSession) error {
 		extraTools = s.mcpMgr.Tools(ctx, s.cfg.Get().MCPServers, s.ws.Root(), sess.id)
 	}
 	extraTools = append(extraTools, dispatchTools...)
+	// 主 Agent 的私聊工具：向同会话的 work agent 发送消息并等待回复。
+	if s.registry != nil {
+		msgTool, err := SendMessageTool(s.registry, s.bus, sess.id, sess.agentID, "orchestrator")
+		if err != nil {
+			return fmt.Errorf("注册 send_message 工具失败: %w", err)
+		}
+		extraTools = append(extraTools, msgTool)
+	}
 	var ag adk.Agent
 	if s.ws.IsSet() {
 		// workspace 已设置：主 Agent 携带 explorer 分派工具 + 写操作审批工具 + 执行工具 + MCP 工具
@@ -400,6 +417,7 @@ func (s *ChatService) buildDispatchTools(ctx context.Context, sess *chatSession,
 		Config: s.cfg, Workspace: s.ws, Approval: s.appr,
 		BackupDir: s.backupRoot, SessionID: sess.id,
 		Whitelist: s.cfg.ShellWhitelist(), MCP: s.mcpMgr,
+		Registry: s.registry, Bus: s.bus,
 	}
 	var out []tool.BaseTool
 	var infos []DispatchInfo
@@ -424,6 +442,9 @@ func (s *ChatService) buildDispatchTools(ctx context.Context, sess *chatSession,
 			continue
 		}
 		seen[wa.ToolName] = true
+		if s.registry != nil {
+			s.registry.Register(sess.id, wa) // 配置重建覆盖时清空该 Agent 私聊历史
+		}
 		out = append(out, adk.NewAgentTool(ctx, wa.Agent))
 		infos = append(infos, DispatchInfo{Name: wa.ToolName, Description: spec.Description})
 	}

@@ -1,0 +1,101 @@
+package agent
+
+// AgentRegistry：按 (sessionID, agentID) 保持 work agent 的常驻会话。
+// 用途：
+//   - agent-to-agent 私聊（send_message）需要独立 Runner 与跨调用历史；
+//   - 同一 (session, agent) 串行，避免私聊上下文竞争；
+//   - 不同 Agent 各自持锁，可并行。
+//
+// dispatch_<name> 仍由 adk.NewAgentTool 生成，不经过 Registry；它不读写私聊历史，
+// 与私聊并发时互不污染（已知取舍，见设计文档阶段 C）。
+
+import (
+	"context"
+	"strings"
+	"sync"
+
+	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/schema"
+
+	"ai-dog-agent/internal/agentspec"
+)
+
+// agentSession 一个 work agent 的私聊会话。
+type agentSession struct {
+	spec   agentspec.Spec
+	agent  adk.Agent
+	runner *adk.Runner
+
+	mu      sync.Mutex // 同一 (session, agent) 串行
+	history []*schema.Message
+}
+
+// Registry 会话级 Agent 注册表。
+type Registry struct {
+	mu       sync.Mutex
+	sessions map[string]map[string]*agentSession // sessionID -> agentID -> session
+}
+
+// NewRegistry 创建注册表。
+func NewRegistry() *Registry {
+	return &Registry{sessions: make(map[string]map[string]*agentSession)}
+}
+
+// Register 注册/覆盖一个 work agent 会话。覆盖时清空该 Agent 的私聊历史
+// （配置重建后旧历史对新的提示词/工具集不再有意义）。
+func (r *Registry) Register(sessionID string, wa *WorkAgent) *agentSession {
+	as := &agentSession{
+		spec:  wa.Spec,
+		agent: wa.Agent,
+		runner: adk.NewRunner(context.Background(), adk.RunnerConfig{
+			Agent:           wa.Agent,
+			EnableStreaming: true,
+		}),
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	m := r.sessions[sessionID]
+	if m == nil {
+		m = make(map[string]*agentSession)
+		r.sessions[sessionID] = m
+	}
+	m[wa.Spec.AgentID] = as
+	return as
+}
+
+// Lookup 按 agentID → 名称 → dispatch 工具名解析目标。
+func (r *Registry) Lookup(sessionID, ref string) (*agentSession, bool) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return nil, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	m := r.sessions[sessionID]
+	if m == nil {
+		return nil, false
+	}
+	if as, ok := m[ref]; ok {
+		return as, true
+	}
+	for _, as := range m {
+		if as.spec.Name == ref || DispatchToolName(as.spec) == ref {
+			return as, true
+		}
+	}
+	return nil, false
+}
+
+// RemoveSession 删除一个会话的全部 Agent 会话（会话删除/服务退出时调用）。
+func (r *Registry) RemoveSession(sessionID string) {
+	r.mu.Lock()
+	delete(r.sessions, sessionID)
+	r.mu.Unlock()
+}
+
+// Count 返回指定会话已注册的 Agent 数量（测试与诊断用）。
+func (r *Registry) Count(sessionID string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.sessions[sessionID])
+}

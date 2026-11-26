@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-26-multi-agent-architecture-design.md` §3.1–3.6、§6 阶段 A。
 
-**Status:** 阶段 A/B 已完成（2026-11-26）；阶段 C–E 未开始。
+**Status:** 阶段 A/B/C 已完成（2026-11-26）；阶段 D–E 未开始。
 
 ## Global Constraints
 
@@ -114,10 +114,13 @@
 - [x] TaskPanel 覆盖全部状态，恢复按钮扩展到 cancelled/rejected。
 - [x] 测试：迁移表、非法迁移、BLOCKED 往返、终态幂等、旧库迁移、审批钩子。
 
-### 阶段 C：agent-to-agent 私聊
+### 阶段 C：agent-to-agent 私聊（已完成 2026-11-26）
 
-- `AgentRegistry` 按 `(session, agent)` 保持历史/inbox。
-- `send_message` 同步 + 超时/取消 + 深度限制；事件流展示来源/目标 Agent。
+- [x] `AgentRegistry` 按 `(session, agent)` 保存常驻会话（Runner/历史/串行锁）；dispatch 构建时注册，会话删除/配置重建时清理。
+- [x] `send_message{to, content}`：主 Agent 与 work agent 均可调用；同步等待、120s 超时、历史保留 40 条、同一 Agent 串行。
+- [x] 防递归：深度上限 4，A→B→A 循环与自我调用拒绝；不同 Agent 可并行。
+- [x] `agent_message` 事件与前端可折叠卡片；卡片仅展示当前运行事件，不写入会话历史。
+- [x] 测试：主→work、work→work、历史连续性/截断、并发串行、超时、递归、事件载荷、未知目标。
 
 ### 阶段 D：agent-smith
 
@@ -137,3 +140,6 @@
 - **MCP 连接数**：每个 work agent 独立 MCP 集合可能启动多个子进程；`mcp.Manager` 按 server+workdir 复用连接，后续仍需上限策略。
 - **usage 缺失**：端点不返回 usage 时预算无法判定，仅记录日志，不静默通过。
 - **配置页**：项目配置 RPC 已就绪，但前端仍展示全局配置，阶段 E 统一改造。
+- **私聊历史**：Registry 仅内存保存最近 40 条，跨重启不保留；后续可持久化。
+- **dispatch 与私聊并发**：dispatch 仍走 `adk.NewAgentTool`，不读写私聊历史；同一 Agent 的 dispatch 与私聊可能并发（已确认取舍）。
+- **私聊目标**：主 Agent 不作为私聊目标（避免与主运行冲突）；work→主会返回明确错误。

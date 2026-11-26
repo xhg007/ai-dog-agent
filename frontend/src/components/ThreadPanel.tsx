@@ -12,13 +12,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ChatService } from '../../bindings/ai-dog-agent/internal/agent/index.js'
 import { ConfigService } from '../../bindings/ai-dog-agent/internal/service/index.js'
 import ApprovalCard, { PendingApproval } from './ApprovalCard'
+import AgentMessageCard, { AgentMessageData } from './AgentMessageCard'
 import MarkdownBody from './MarkdownBody'
 
 interface Msg {
-  role: 'user' | 'assistant' | 'error' | 'tool' | 'system'
+  role: 'user' | 'assistant' | 'error' | 'tool' | 'system' | 'agent'
   content: string
   tool?: string
   running?: boolean // 工具调用已开始、结果未回（tool_call 事件已到）
+  agentMsg?: AgentMessageData // role='agent' 时的私聊消息
 }
 
 interface AgentEvent {
@@ -193,6 +195,12 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, runningHint
             })
           }
           break
+        case 'agent_message':
+          // 私聊卡片只展示当前运行事件，不写入会话历史（刷新后不保留）
+          if (e.data) {
+            setMessages(m => [...m, { role: 'agent', content: '', agentMsg: e.data as AgentMessageData }])
+          }
+          break
         case 'chat_error':
           streamingRef.current = false
           setRunning(false)
@@ -295,6 +303,9 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, runningHint
           </div>
         )}
         {messages.map((m, i) => {
+          if (m.role === 'agent' && m.agentMsg) {
+            return <AgentMessageCard key={i} msg={m.agentMsg} />
+          }
           if (m.role === 'assistant') {
             return (
               <div key={i} className={`msg assistant${streamingRef.current && i === messages.length - 1 ? ' streaming' : ''}`}>
