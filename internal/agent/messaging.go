@@ -143,19 +143,52 @@ func (r *Registry) SendMessage(ctx context.Context, sessionID, from string,
 	target.mu.Lock()
 	defer target.mu.Unlock()
 
+	// 注入 work agent 身份：工具事件/审批归属与实际模型用量
+	ctx = withAgentIdentity(ctx, target.spec.AgentID, target.model)
+
 	// 私聊历史超过窗口阈值时先压缩（保留最近轮，早期消息摘要）
 	if ShouldCompress(target.history, target.model.EffectiveContextWindow(), target.spec.Context.EffectiveThreshold()) {
 		if compressed, res := compressAgentHistory(ctx, target); compressed != nil {
 			target.history = compressed
-			if res != nil && r.bus != nil {
-				r.bus.Emit(eventbus.Event{
-					Type: eventbus.EvContextCompressed, SessionID: sessionID,
-					Data: eventbus.ContextCompressedData{
-						AgentID: target.spec.AgentID, BeforeTokens: res.BeforeTokens,
-						AfterTokens: res.AfterTokens, Strategy: res.Strategy,
-						Summarized: res.Summarized,
-					},
-				})
+			if res != nil {
+				if r.bus != nil {
+					r.bus.Emit(eventbus.Event{
+						Type: eventbus.EvContextCompressed, SessionID: sessionID,
+						Data: eventbus.ContextCompressedData{
+							AgentID: target.spec.AgentID, BeforeTokens: res.BeforeTokens,
+							AfterTokens: res.AfterTokens, Strategy: res.Strategy,
+							Summarized: res.Summarized,
+						},
+					})
+				}
+				if res.Usage != nil {
+					limits := WorkLimits(target.spec.Budget)
+					inTok := int64(res.Usage.PromptTokens)
+					outTok := int64(res.Usage.CompletionTokens)
+					costIn := float64(inTok) / 1e6 * target.model.PriceIn
+					costOut := float64(outTok) / 1e6 * target.model.PriceOut
+					target.compressTokens += inTok + outTok
+					target.compressCost += costIn + costOut
+					if r.bus != nil {
+						r.bus.Emit(eventbus.Event{
+							Type: eventbus.EvLLMUsage, SessionID: sessionID,
+							Data: eventbus.LLMUsageData{
+								AgentID: target.spec.AgentID, Model: target.model.Name,
+								ModelID: target.model.ID, InputTokens: inTok, OutputTokens: outTok,
+								CostIn: costIn, CostOut: costOut,
+							},
+						})
+					}
+					// 压缩本身消耗预算：超过该 Agent 的 max_tokens / max_cost 时终止本次私聊
+					if limits.MaxTokens > 0 && target.compressTokens > limits.MaxTokens {
+						return "", &LimitError{Kind: LimitTokens, Limit: float64(limits.MaxTokens),
+							Used: float64(target.compressTokens), Sentinel: ErrMaxTokens}
+					}
+					if limits.MaxCost > 0 && target.compressCost > limits.MaxCost {
+						return "", &LimitError{Kind: LimitCost, Limit: limits.MaxCost,
+							Used: target.compressCost, Sentinel: ErrBudgetExceeded}
+					}
+				}
 			}
 		}
 	}

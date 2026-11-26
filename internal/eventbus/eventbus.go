@@ -29,10 +29,10 @@ const (
 	EvContextCompressed = "context_compressed" // 上下文压缩事件
 )
 
-// TaskStateData 任务状态载荷。
+// TaskStateData 任务状态载荷（由 task.Manager 的状态迁移统一发出并落库 task_events）。
 type TaskStateData struct {
 	TaskID string `json:"taskId"`
-	Status string `json:"status"` // running/completed/failed/interrupted
+	Status string `json:"status"` // store.Status*：pending/ready/assigned/running/blocked/review/rejected/completed/cancelled/failed
 	Title  string `json:"title,omitempty"`
 	Error  string `json:"error,omitempty"`
 }
@@ -74,9 +74,10 @@ type ChatDoneData struct {
 
 // ToolCallData 工具调用开始载荷（TaskID 关联任务；Args 为 JSON 摘要）。
 type ToolCallData struct {
-	TaskID string `json:"taskId,omitempty"`
-	Tool   string `json:"tool"`
-	Args   string `json:"args,omitempty"`
+	TaskID  string `json:"taskId,omitempty"`
+	AgentID string `json:"agentId,omitempty"`
+	Tool    string `json:"tool"`
+	Args    string `json:"args,omitempty"`
 }
 
 // LLMUsageData LLM 调用用量与成本载荷（FR-5.4）。
@@ -134,6 +135,7 @@ type ContextCompressedData struct {
 type ApprovalRequestData struct {
 	ID        string `json:"id"`
 	SessionID string `json:"sessionId"`
+	AgentID   string `json:"agentId,omitempty"` // 发起工具调用的 Agent（主/工作/smith）
 	Tool      string `json:"tool"`
 	Path      string `json:"path"`
 	Preview   string `json:"preview"`

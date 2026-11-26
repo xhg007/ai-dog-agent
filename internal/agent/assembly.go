@@ -166,7 +166,9 @@ func OrchestratorTools(ctx context.Context, ws *workspace.Manager, cm model.Base
 		if err != nil {
 			return nil, fmt.Errorf("构建 explorer 子 Agent 失败: %w", err)
 		}
-		toolList = append(toolList, adk.NewAgentTool(ctx, explorer))
+		toolList = append(toolList, adk.NewAgentTool(ctx, &agentWithIdentity{
+			Agent: explorer, agentID: "explorer",
+		}))
 	}
 	// 写操作工具（write_file / edit_file）：经审批门 + 自动备份
 	if appr != nil {

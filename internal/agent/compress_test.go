@@ -151,7 +151,7 @@ func TestCompressSessionEvent(t *testing.T) {
 	s := &ChatService{bus: bus}
 	sess := &chatSession{id: "s1"}
 	input := longMessages(10, 100)
-	compressed, res := s.compressSession(context.Background(), sess, input, mc, "agent-x",
+	compressed, res := s.compressSession(context.Background(), sess, input, mc, "agent-x", "",
 		agentspec.ContextConfig{CompressThreshold: 0.5, KeepRecent: 2})
 	if compressed == nil || res == nil {
 		t.Fatalf("应压缩: compressed=%v res=%v", compressed, res)

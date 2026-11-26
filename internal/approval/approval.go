@@ -18,6 +18,28 @@ import (
 // ErrDenied 用户拒绝了审批请求。
 var ErrDenied = errors.New("用户拒绝了该操作")
 
+// agentIDKey 在 ctx 中标记发起工具调用的 Agent（审批/工具事件归因）。
+type agentIDKey struct{}
+
+// WithAgentID 在 ctx 中标记发起 Agent；空 ID 不写入。
+func WithAgentID(ctx context.Context, agentID string) context.Context {
+	if ctx == nil || agentID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, agentIDKey{}, agentID)
+}
+
+// AgentIDFromContext 读取 ctx 中的发起 Agent ID。
+func AgentIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if id, ok := ctx.Value(agentIDKey{}).(string); ok {
+		return id
+	}
+	return ""
+}
+
 // pendingReq 一次待决策的审批。
 type pendingReq struct {
 	req    eventbus.ApprovalRequestData
@@ -89,7 +111,10 @@ func (m *Manager) RequestContext(ctx context.Context, sessionID, tool, path, pre
 	}
 	id := uuid.NewString()
 	pr := &pendingReq{result: make(chan decision, 1)}
-	pr.req = eventbus.ApprovalRequestData{ID: id, SessionID: sessionID, Tool: tool, Path: path, Preview: preview}
+	pr.req = eventbus.ApprovalRequestData{
+		ID: id, SessionID: sessionID, AgentID: AgentIDFromContext(ctx),
+		Tool: tool, Path: path, Preview: preview,
+	}
 	m.pending[id] = pr
 	m.mu.Unlock()
 

@@ -147,7 +147,7 @@ func newObsHandler(tasks *task.Manager) callbacks.Handler {
 		}
 		seq := tasks.NextCheckpointSeq(oi.TaskID)
 		tasks.Emit(oi.SessionID, oi.TaskID, eventbus.EvToolCall, eventbus.ToolCallData{
-			TaskID: oi.TaskID, Tool: info.Name, Args: args,
+			TaskID: oi.TaskID, AgentID: oi.AgentID, Tool: info.Name, Args: args,
 		})
 		tasks.AppendCheckpoint(store.Checkpoint{
 			TaskID: oi.TaskID, Seq: seq, Phase: "before",

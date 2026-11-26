@@ -181,6 +181,7 @@ function App() {
       if (e.type === 'approval_request') {
         const item: PendingApproval = {
           id: e.data?.id ?? '',
+          agentId: e.data?.agentId ?? '',
           tool: e.data?.tool ?? '',
           path: e.data?.path ?? '',
           preview: e.data?.preview ?? '',

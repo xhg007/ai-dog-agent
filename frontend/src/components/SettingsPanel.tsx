@@ -80,7 +80,7 @@ interface AppConfig {
   agentSmithAuto?: boolean
 }
 
-type Tab = 'models' | 'skills' | 'mcp' | 'agents' | 'project' | 'appearance' | 'security' | 'usage'
+type Tab = 'models' | 'skills' | 'mcp' | 'project' | 'appearance' | 'security' | 'usage'
 
 interface DailyUsageRow { date: string; calls: number; inputTokens: number; outputTokens: number; costTotal: number }
 
@@ -325,14 +325,12 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
   }
 
   const saveCurrent = async () => {
-    if (tab === 'agents') {
-      // Agent 配置与全局开关（agentSmithAuto）在不同文件，保存时一起提交
+    if (tab === 'project') {
+      // 项目设置页同时承载项目级配置、work agent 定义与全局开关（agentSmithAuto），
+      // 三者落在不同文件，保存时一起提交
+      await saveProject()
       await saveAgents()
       await saveConfig()
-      return
-    }
-    if (tab === 'project') {
-      await saveProject()
       return
     }
     await saveConfig()
@@ -401,8 +399,7 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
     { id: 'models', label: '模型' },
     { id: 'skills', label: `Skills (${cfg.skills.length})` },
     { id: 'mcp', label: `MCP (${cfg.mcpServers.length})` },
-    { id: 'agents', label: `项目 Agent (${agents.length})` },
-    { id: 'project', label: '项目设置' },
+    { id: 'project', label: `项目设置 (Agent ${agents.length})` },
     { id: 'appearance', label: '外观' },
     { id: 'security', label: '安全' },
     { id: 'usage', label: '用量' },
@@ -517,13 +514,66 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
           </>
         )}
 
-        {tab === 'agents' && (
+        {tab === 'project' && (
           <>
-            <h3>项目自定义 Agent（配置随项目走）</h3>
+            <h3>项目设置</h3>
+            <p className="hint">
+              项目级配置来自 {agentDir || '.aidog'}；加载前需确认信任，高危配置会被自动拉黑。
+              保存后下次构建 Agent 时生效。
+            </p>
+            {projectStatus ? (
+              <div className="model-row">
+                <div style={{ flex: 1 }}>
+                  <div className="form-grid">
+                    <Label>信任状态</Label>
+                    <div>
+                      <Badge variant="outline">{projectStatus.status}</Badge>
+                      {projectStatus.audit?.blocked && (
+                        <span className="hint text-destructive"> 存在高危配置</span>
+                      )}
+                    </div>
+                    <Label>审计统计</Label>
+                    <div className="hint">
+                      高危 {projectStatus.audit?.highCount ?? 0} · 中危 {projectStatus.audit?.mediumCount ?? 0} · 低危 {projectStatus.audit?.lowCount ?? 0}
+                    </div>
+                  </div>
+                  <div className="row-actions">
+                    {projectStatus.status === 'untrusted' && (
+                      <Button variant="secondary" size="sm" disabled={projectBusy}
+                        onClick={() => updateTrust('trust')}>信任项目配置</Button>
+                    )}
+                    {projectStatus.status === 'trusted' && (
+                      <Button variant="outline" size="sm" disabled={projectBusy}
+                        onClick={() => updateTrust('untrust')}>取消信任</Button>
+                    )}
+                    {projectStatus.status === 'blocked' && (
+                      <Button variant="destructive" size="sm" disabled={projectBusy}
+                        onClick={() => updateTrust('unblock')}>解除拉黑（需再次确认信任）</Button>
+                    )}
+                  </div>
+                </div>
+                <div className="meta">{projectStatus.root}</div>
+              </div>
+            ) : (
+              <p className="hint">设置工作区后可查看项目配置状态。</p>
+            )}
+            {projectStatus?.audit?.findings?.length > 0 && (
+              <div className="model-row">
+                <div style={{ flex: 1 }}>
+                  <h4>审计发现</h4>
+                  <ul className="hint">
+                    {projectStatus.audit.findings.map((f: any, i: number) => (
+                      <li key={i}>[{f.severity}] {f.rule} · {f.file} · {f.evidence}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+            <h4>项目 Agent（work agent）</h4>
             <p className="hint">
               目录：{agentDir || '未设置工作区，请先在左侧「项目」选择目录'}<br />
-              每个 Agent 对应一个 .json 文件，Schema：agent_id（自动生成固化，唯一不变）/ name / description / system_prompt / model / tools / skills / mcp_servers / max_turns。<br />
-              当前版本把定义注入主 Agent 上下文；按配置分派执行（独立上下文 / skill / MCP 工具集）在后续里程碑接入。保存后对当前会话下一轮生效。
+              每个 Agent 对应 .aidog/agents 下的一个 .json 文件：agent_id（自动生成固化，唯一不变）/ name / description / system_prompt / model / tools / skills / mcp_servers / max_turns / budget / context。<br />
+              work agent 按此定义分派执行（独立上下文 / Skill / MCP 工具集）；保存后对当前会话下一轮生效。
             </p>
             {!agentDir && <p className="hint">设置工作区后即可添加项目级 Agent。</p>}
             <div className="form-grid" style={{ marginBottom: 12 }}>
@@ -536,6 +586,7 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
                 <span className="hint">任务失败/取消后自动运行 agent-smith（写配置仍需审批）</span>
               </div>
             </div>
+            {agents.length === 0 && <p className="hint">暂无项目 Agent，点击下方「添加 Agent」创建。</p>}
             {agents.map((a, i) => (
               <div key={i} className="model-row">
                 <div style={{ flex: 1 }}>
@@ -630,83 +681,6 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
               ><Wand2 className="size-3.5" /> {smithBusy ? '优化中…' : '优化 Agent'}</Button>
               {smithMsg && <span className="hint">{smithMsg}</span>}
             </div>
-          </>
-        )}
-
-        {tab === 'project' && (
-          <>
-            <h3>项目设置</h3>
-            <p className="hint">
-              项目级配置来自 {agentDir || '.aidog'}；加载前需确认信任，高危配置会被自动拉黑。
-              保存后下次构建 Agent 时生效。
-            </p>
-            {projectStatus ? (
-              <div className="model-row">
-                <div style={{ flex: 1 }}>
-                  <div className="form-grid">
-                    <Label>信任状态</Label>
-                    <div>
-                      <Badge variant="outline">{projectStatus.status}</Badge>
-                      {projectStatus.audit?.blocked && (
-                        <span className="hint text-destructive"> 存在高危配置</span>
-                      )}
-                    </div>
-                    <Label>审计统计</Label>
-                    <div className="hint">
-                      高危 {projectStatus.audit?.highCount ?? 0} · 中危 {projectStatus.audit?.mediumCount ?? 0} · 低危 {projectStatus.audit?.lowCount ?? 0}
-                    </div>
-                  </div>
-                  <div className="row-actions">
-                    {projectStatus.status === 'untrusted' && (
-                      <Button variant="secondary" size="sm" disabled={projectBusy}
-                        onClick={() => updateTrust('trust')}>信任项目配置</Button>
-                    )}
-                    {projectStatus.status === 'trusted' && (
-                      <Button variant="outline" size="sm" disabled={projectBusy}
-                        onClick={() => updateTrust('untrust')}>取消信任</Button>
-                    )}
-                    {projectStatus.status === 'blocked' && (
-                      <Button variant="destructive" size="sm" disabled={projectBusy}
-                        onClick={() => updateTrust('unblock')}>解除拉黑（需再次确认信任）</Button>
-                    )}
-                  </div>
-                </div>
-                <div className="meta">{projectStatus.root}</div>
-              </div>
-            ) : (
-              <p className="hint">设置工作区后可查看项目配置状态。</p>
-            )}
-            {projectStatus?.audit?.findings?.length > 0 && (
-              <div className="model-row">
-                <div style={{ flex: 1 }}>
-                  <h4>审计发现</h4>
-                  <ul className="hint">
-                    {projectStatus.audit.findings.map((f: any, i: number) => (
-                      <li key={i}>[{f.severity}] {f.rule} · {f.file} · {f.evidence}</li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            )}
-            <h4>项目 Agent（work agent）</h4>
-            {agents.length === 0 ? (
-              <p className="hint">暂无项目 Agent，可在「项目 Agent」tab 添加。</p>
-            ) : (
-              <div className="model-row">
-                <div style={{ flex: 1 }}>
-                  <ul className="hint">
-                    {agents.map(a => (
-                      <li key={a.agent_id || a.name}>
-                        {a.name || '未命名'} · 模型 {a.model || '跟随主模型'} · 工具 {a.tools || '只读'} · 预算 {a.budget?.max_steps || '默认'} 步
-                      </li>
-                    ))}
-                  </ul>
-                  <Button variant="outline" size="sm" onClick={() => setTab('agents')}>
-                    编辑完整字段
-                  </Button>
-                </div>
-              </div>
-            )}
             <h4>项目专属 Skills</h4>
             <SkillEditor
               skills={projectCfg.skills ?? []}
@@ -781,7 +755,9 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
               </Button>
               {projectMsg && <span className="hint">{projectMsg}</span>}
             </div>
-            <p className="hint">主 Agent 覆盖与项目专属 MCP/Skill 编辑在本页后续接入。</p>
+            <p className="hint">
+              保存会一并提交项目配置、work agent 定义与全局「自动优化 Agent」开关（分别写入 .aidog 与全局配置）。
+            </p>
           </>
         )}
 

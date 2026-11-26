@@ -34,6 +34,9 @@ type agentSession struct {
 	history []*schema.Message
 
 	lastCompress time.Time // 上次压缩时间（冷却防抖）
+
+	compressTokens int64   // 私聊压缩累计 token（预算判定）
+	compressCost   float64 // 私聊压缩累计成本（元）
 }
 
 // Registry 会话级 Agent 注册表。

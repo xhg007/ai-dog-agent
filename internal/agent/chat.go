@@ -464,7 +464,9 @@ func (s *ChatService) buildDispatchTools(ctx context.Context, sess *chatSession,
 		if s.registry != nil {
 			s.registry.Register(sess.id, wa) // 配置重建覆盖时清空该 Agent 私聊历史
 		}
-		out = append(out, adk.NewAgentTool(ctx, wa.Agent))
+		out = append(out, adk.NewAgentTool(ctx, &agentWithIdentity{
+			Agent: wa.Agent, agentID: spec.AgentID, model: wa.Model,
+		}))
 		infos = append(infos, DispatchInfo{Name: wa.ToolName, Description: spec.Description})
 	}
 	return out, infos
@@ -536,7 +538,7 @@ func (s *ChatService) OptimizeAgents(sessionID string) error {
 
 // compressSession 压缩主 Agent 会话历史并写回；失败时返回 nil（调用方继续用原 input）。
 func (s *ChatService) compressSession(ctx context.Context, sess *chatSession,
-	input []*schema.Message, mc config.ModelConfig, agentID string,
+	input []*schema.Message, mc config.ModelConfig, agentID, taskID string,
 	contextCfg agentspec.ContextConfig) ([]*schema.Message, *CompressionResult) {
 	if time.Since(sess.lastCompress) < compressCooldown {
 		return nil, nil
@@ -563,14 +565,16 @@ func (s *ChatService) compressSession(ctx context.Context, sess *chatSession,
 	s.mu.Unlock()
 	slog.Info("上下文已压缩", "session", sess.id, "before", res.BeforeTokens,
 		"after", res.AfterTokens, "strategy", res.Strategy, "summarized", res.Summarized)
-	if s.bus != nil {
-		s.bus.Emit(eventbus.Event{
-			Type: eventbus.EvContextCompressed, SessionID: sess.id,
-			Data: eventbus.ContextCompressedData{
-				AgentID: agentID, BeforeTokens: res.BeforeTokens, AfterTokens: res.AfterTokens,
-				Strategy: res.Strategy, Summarized: res.Summarized,
-			},
-		})
+	data := eventbus.ContextCompressedData{
+		AgentID: agentID, BeforeTokens: res.BeforeTokens, AfterTokens: res.AfterTokens,
+		Strategy: res.Strategy, Summarized: res.Summarized,
+	}
+	// 主 Agent 有任务时走 task.Manager.Emit（同时落 task_events 与推送）
+	switch {
+	case s.tasks != nil && taskID != "":
+		s.tasks.Emit(sess.id, taskID, eventbus.EvContextCompressed, data)
+	case s.bus != nil:
+		s.bus.Emit(eventbus.Event{Type: eventbus.EvContextCompressed, SessionID: sess.id, Data: data})
 	}
 	return compressed, &res
 }
@@ -633,7 +637,7 @@ func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
 	input := historyMessages(stored)
 	// 上下文压缩：超过模型窗口 × 阈值时，早期消息摘要 + 保留最近轮
 	if ShouldCompress(input, modelCfg.EffectiveContextWindow(), contextCfg.EffectiveThreshold()) {
-		if compressed, res := s.compressSession(execCtx, sess, input, modelCfg, agentID, contextCfg); compressed != nil {
+		if compressed, res := s.compressSession(execCtx, sess, input, modelCfg, agentID, taskID, contextCfg); compressed != nil {
 			input = compressed
 			s.mu.Lock()
 			stored = append([]StoredMessage(nil), sess.messages...)
@@ -669,7 +673,7 @@ func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
 	}
 	snapshot := marshalMessages(stored)
 	// 观测上下文：会话/任务标识 + 消息快照 + 实际模型（用量归因）+ 执行计数器
-	runCtx := withObsInfo(execCtx, &obsInfo{
+	runCtx := withObsInfo(approval.WithAgentID(execCtx, agentID), &obsInfo{
 		SessionID: sessionID, TaskID: taskID, Snapshot: snapshot,
 		AgentID: agentID, ModelID: modelCfg.ID, ModelName: modelCfg.Name,
 		PriceIn: modelCfg.PriceIn, PriceOut: modelCfg.PriceOut,

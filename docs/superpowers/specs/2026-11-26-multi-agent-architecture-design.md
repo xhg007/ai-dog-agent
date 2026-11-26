@@ -128,7 +128,9 @@ work agent 动态生成 `Dispatches`，提示词与工具集一致。
   - **全局设置**：模型 / 全局 MCP / 全局 Skill / 外观 / 安全 / 用量。
   - **项目设置**：work agent、主 Agent 覆盖（工具/MCP/Skill/模型/预算/压缩）、
     项目专属 MCP/Skill（可选）、项目预算与压缩阈值。
-- 当前 `SettingsPanel` 的 Tab 需要按来源分组或标注“全局/项目”。
+- `SettingsPanel` 已按来源分组：全局 tab 为模型 / Skills / MCP / 外观 / 安全 / 用量；
+  「项目设置」tab 统一承载 .aidog 信任与审计、work agent 完整编辑（含预算/压缩）、
+  主 Agent 覆盖与项目专属 MCP/Skill。
 
 ### 3.5 work agent 运行时
 

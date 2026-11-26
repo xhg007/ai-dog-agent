@@ -218,6 +218,16 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, runningHint
           setMessages(m => [...m, { role: 'system', content: text }])
           break
         }
+        case 'context_compressed': {
+          const d = e.data ?? {}
+          const strategy = d.strategy === 'summary' ? '模型摘要' : '规则截断'
+          const summarized = d.summarized ? `，压缩 ${d.summarized} 条早期消息` : ''
+          setMessages(m => [...m, {
+            role: 'system',
+            content: `上下文已压缩：${d.beforeTokens ?? '?'} → ${d.afterTokens ?? '?'} tokens（${strategy}${summarized}）`,
+          }])
+          break
+        }
         case 'chat_error':
           streamingRef.current = false
           setRunning(false)

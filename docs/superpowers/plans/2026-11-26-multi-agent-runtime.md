@@ -1,4 +1,4 @@
-# 多 Agent 运行时（阶段 A）实施计划
+# 多 Agent 运行时实施计划（阶段 A–E）
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -103,7 +103,7 @@
 | 主 Agent 分派工具与提示词一致 | ✅ dispatch_test |
 | 全量 Go 测试 / vet / 前端构建 | ✅ |
 
-## 阶段 B–E 待办
+## 阶段 B–E（全部完成）
 
 ### 阶段 B：任务状态机（已完成 2026-11-26）
 
@@ -135,7 +135,7 @@
 
 - [x] token 估算（rune/3）+ 阈值触发；保留最近轮，早期消息由 Agent 模型摘要，失败降级规则截断。
 - [x] 主 Agent 会话与 work agent 私聊历史压缩；摘要 usage 计入预算；30s 冷却；`context_compressed` 事件。
-- [x] 配置页新增「项目设置」tab：信任/审计、主 Agent 覆盖、项目专属 MCP/Skill、work agent 预算/压缩。
+- [x] 配置页新增「项目设置」tab：信任/审计、主 Agent 覆盖、项目专属 MCP/Skill、work agent 完整编辑（预算/压缩）。
 - [x] `.aidog` 首次信任确认 + 持久化；审计规则自动拉黑高危；解除拉黑需二次确认。
 - [x] 测试：估算/阈值/摘要/降级/事件/冷却、审计规则、拉黑/信任/持久化。
 
@@ -146,7 +146,7 @@
 - **项目配置信任**：已实现首次确认 + 持久化 + 自动审计；审计为启发式规则，不保证查杀所有后门；强制信任后不再自动拉黑。
 - **MCP 连接数**：每个 work agent 独立 MCP 集合可能启动多个子进程；`mcp.Manager` 按 server+workdir 复用连接，后续仍需上限策略。
 - **usage 缺失**：端点不返回 usage 时预算无法判定，仅记录日志，不静默通过。
-- **配置页**：已完成全局/项目分组、项目专属 MCP/Skill 与预算/压缩编辑。
+- **配置页**：已完成全局/项目分组；「项目设置」tab 承载 work agent 完整编辑、主 Agent 覆盖与项目专属 MCP/Skill。
 - **上下文压缩**：摘要可能丢失关键约束；失败时降级规则截断并保留最近轮；压缩本身消耗预算并计入上限。
 - **agent-smith 自动触发**：默认关闭；开启后失败/取消会自动消耗一次主模型调用。
 - **smith 修改范围**：每次只处理一个 work agent 的一次修改，不批量；不改主 Agent/全局配置。

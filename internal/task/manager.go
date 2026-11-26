@@ -1,5 +1,6 @@
 // Package task 任务生命周期管理（M5 FR-5.1/5.2）：
-// 一次用户消息触发的执行轮次 = 一个任务（running → completed/failed/interrupted）。
+// 一次用户消息触发的执行轮次 = 一个任务，按状态机流转
+// （pending → ready → assigned → running → review → completed，异常走 failed/cancelled/blocked）。
 // Manager 组合「store 异步落库 + eventbus 推送」，对外提供统一入口，
 // 使 ChatService / callbacks / fallback 都不必各自处理持久化细节。
 package task

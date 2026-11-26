@@ -18,7 +18,7 @@
 - **后台 Meta Agent**：专职优化与创造子 Agent 配置（阶段 D，未实现）。
 - **上下文前缀稳定**：系统提示词静态前缀在前、动态内容追加在后，保证提示词缓存命中。
 - **会话持久化**：会话元数据与消息历史按会话落盘 `%AppData%/ai-dog-agent/sessions/*.json`，关闭软件后线程列表与对话记录可恢复，并在后续轮次回放历史。
-- **配置**：设置页提供模型（OpenAI 兼容）、Skills、MCP Server 以及项目级子 Agent（`.aidog/agents/*.json`）的可视化编辑；启用项追加到主 Agent 动态上下文。
+- **配置**：设置页提供模型（OpenAI 兼容）、Skills、MCP Server 的可视化编辑；「项目设置」tab 统一编辑项目级子 Agent（`.aidog/agents/*.json`，含预算与压缩）、主 Agent 覆盖、项目专属 MCP/Skill 与 `.aidog` 信任确认；启用项追加到主 Agent 动态上下文。
 - **Markdown**：助手回复支持 GFM 表格、代码块、列表（remark-gfm）。
 
 ## 开发

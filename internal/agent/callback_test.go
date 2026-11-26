@@ -133,6 +133,7 @@ func TestObsHandler_ToolCheckpoints(t *testing.T) {
 
 	ctx := withObsInfo(context.Background(), &obsInfo{
 		SessionID: "s1", TaskID: taskID, Snapshot: `[{"role":"user","content":"hi"}]`,
+		AgentID: "agent-w",
 	})
 	tinfo := &callbacks.RunInfo{Name: "go_test", Type: "GoTool", Component: components.ComponentOfTool}
 
@@ -140,7 +141,7 @@ func TestObsHandler_ToolCheckpoints(t *testing.T) {
 	h.OnStart(ctx, tinfo, &tool.CallbackInput{ArgumentsInJSON: `{"dir":"internal"}`})
 	ev := waitEventCb(t, ch, eventbus.EvToolCall)
 	tc, ok := ev.Data.(eventbus.ToolCallData)
-	if !ok || tc.Tool != "go_test" || tc.Args != `{"dir":"internal"}` {
+	if !ok || tc.Tool != "go_test" || tc.AgentID != "agent-w" || tc.Args != `{"dir":"internal"}` {
 		t.Fatalf("tool_call 事件不符: %+v", ev.Data)
 	}
 

@@ -6,6 +6,7 @@ import { ApprovalService } from '../../bindings/ai-dog-agent/internal/service/in
 
 export interface PendingApproval {
   id: string
+  agentId?: string
   tool: string
   path: string
   preview: string
@@ -39,6 +40,9 @@ export default function ApprovalCard({ approval, onDone }: Props) {
       <div className="approval-head">
         <Badge variant="outline" className="approval-badge gap-1"><ShieldAlert className="size-3" /> 需要审批</Badge>
         <span className="approval-tool">{approval.tool}</span>
+        {approval.agentId && (
+          <span className="approval-path" title={approval.agentId}>Agent {approval.agentId.slice(0, 8)}</span>
+        )}
         <span className="approval-path" title={approval.path}>{approval.path}</span>
       </div>
       <pre className="approval-diff">{approval.preview}</pre>
