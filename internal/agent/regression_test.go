@@ -62,8 +62,8 @@ func TestPersistLiveSessionStillWorks(t *testing.T) {
 	}
 }
 
-// MCP 已接入：动态上下文不能再声称「M6 提供」，且要列出启用的 server（stdio 与远程）。
-func TestBuildDynamicExtrasMCPWording(t *testing.T) {
+// MCP 已接入：提示词不能再声称「M6 提供」，且要列出启用的 server（stdio 与远程）。
+func TestPromptDataMCPWording(t *testing.T) {
 	cfg, err := config.NewManagerAt(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -79,21 +79,24 @@ func TestBuildDynamicExtrasMCPWording(t *testing.T) {
 	}
 
 	svc := &ChatService{cfg: cfg, ws: workspace.New()}
-	extras := svc.buildDynamicExtras()
+	rendered, err := renderOrchestratorPrompt(svc.buildPromptData())
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	if strings.Contains(extras, "M6") {
-		t.Fatalf("MCP 文案仍在提示 M6: %s", extras)
+	if strings.Contains(rendered, "M6") {
+		t.Fatalf("MCP 文案仍在提示 M6: %s", rendered)
 	}
-	if !strings.Contains(extras, "mcp_<server>_<tool>") {
-		t.Fatalf("应说明 MCP 工具命名: %s", extras)
+	if !strings.Contains(rendered, "mcp_<server>_<tool>") {
+		t.Fatalf("应说明 MCP 工具命名: %s", rendered)
 	}
-	if !strings.Contains(extras, "local-fs") || !strings.Contains(extras, "remote") {
-		t.Fatalf("未列出启用的 server 名称: %s", extras)
+	if !strings.Contains(rendered, "local-fs") || !strings.Contains(rendered, "remote") {
+		t.Fatalf("未列出启用的 server 名称: %s", rendered)
 	}
-	if strings.Contains(extras, "https://example.com/mcp") || strings.Contains(extras, "npx") {
-		t.Fatalf("不应把 MCP 连接细节（可能含密钥）写入系统提示词: %s", extras)
+	if strings.Contains(rendered, "https://example.com/mcp") || strings.Contains(rendered, "npx") {
+		t.Fatalf("不应把 MCP 连接细节（可能含密钥）写入系统提示词: %s", rendered)
 	}
-	if strings.Contains(extras, "- off：") {
-		t.Fatalf("未启用的 server 不应进入上下文: %s", extras)
+	if strings.Contains(rendered, "- off") {
+		t.Fatalf("未启用的 server 不应进入上下文: %s", rendered)
 	}
 }

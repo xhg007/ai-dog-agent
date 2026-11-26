@@ -5,7 +5,8 @@
 - **GUI**：Wails3 + React + TypeScript
 - **Agent 内核**：Eino（ADK 多 Agent 编排 / Graph 工作流）
 - **模型**：OpenAI 兼容协议自填（DeepSeek / Qwen / GLM / OpenAI 通用）
-- **工具协议**：MCP Go SDK（预留）
+- **工具协议**：MCP Go SDK（stdio / HTTP / SSE）
+- **语言无关**：任何语言/构建系统的项目都可使用；Go 为首个一等支持（go_test/go_vet/go_build 与 Go 符号索引）。非 Go 项目的构建/测试命令需加入 Shell 白名单（或逐次审批）
 - **需求文档**：见 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)
 
 ## 架构要点

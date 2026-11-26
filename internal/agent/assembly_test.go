@@ -71,6 +71,37 @@ func TestBuildProjectContextNoWorkspace(t *testing.T) {
 	}
 }
 
+// 非 Go 项目也应给出语言/构建线索，而不是“非 Go Module”。
+func TestBuildProjectContextNonGo(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("# web demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"name":"web"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ws := workspace.New()
+	if err := ws.SetRoot(root); err != nil {
+		t.Fatal(err)
+	}
+
+	ctxText, err := BuildProjectContext(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"项目文件", "package.json", "README 摘要", "web demo"} {
+		if !strings.Contains(ctxText, want) {
+			t.Fatalf("非 Go 项目上下文缺少 %q:\n%s", want, ctxText)
+		}
+	}
+	if strings.Contains(ctxText, "非 Go Module") {
+		t.Fatalf("不应出现“非 Go Module”的负面提示:\n%s", ctxText)
+	}
+	if strings.Contains(ctxText, "## Go Module") {
+		t.Fatalf("非 Go 项目不应输出 Go Module 段:\n%s", ctxText)
+	}
+}
+
 func TestBuildExplorerAgent(t *testing.T) {
 	ws := setupProjectWS(t)
 	ag, err := BuildExplorer(context.Background(), ws, &fakeModel{})
@@ -87,7 +118,7 @@ func TestBuildExplorerAgent(t *testing.T) {
 
 func TestBuildOrchestratorWithExplorer(t *testing.T) {
 	ws := setupProjectWS(t)
-	ag, err := BuildOrchestrator(context.Background(), ws, &fakeModel{}, nil, "", "", nil, "", nil)
+	ag, err := BuildOrchestrator(context.Background(), ws, &fakeModel{}, nil, "", "", nil, PromptData{}, nil)
 	if err != nil {
 		t.Fatalf("BuildOrchestrator 失败: %v", err)
 	}
@@ -99,7 +130,7 @@ func TestBuildOrchestratorWithExplorer(t *testing.T) {
 func TestBuildOrchestratorWithWriteTools(t *testing.T) {
 	ws := setupProjectWS(t)
 	appr := approval.New(eventbus.New())
-	ag, err := BuildOrchestrator(context.Background(), ws, &fakeModel{}, appr, t.TempDir(), "s-test", nil, "", nil)
+	ag, err := BuildOrchestrator(context.Background(), ws, &fakeModel{}, appr, t.TempDir(), "s-test", nil, PromptData{}, nil)
 	if err != nil {
 		t.Fatalf("BuildOrchestrator(含写工具) 失败: %v", err)
 	}

@@ -20,19 +20,6 @@ import (
 	"ai-dog-agent/internal/workspace"
 )
 
-// ExplorerInstruction explorer 子 Agent 系统提示词（稳定前缀）。
-// 动态项目上下文通过 BuildProjectContext 追加到尾部，保证前缀缓存命中。
-const ExplorerInstruction = `你是 ai-dog-agent 的 explorer（项目探索）子 Agent，拥有独立上下文，由主 Agent 分派任务。
-
-# 职责
-- 理解目标项目的结构与代码：目录、模块依赖、入口、符号与引用关系。
-- 优先读取 README.md / AGENTS.md / CLAUDE.md 作为项目背景。
-- 只读操作：你只能使用只读工具，不得修改任何文件。
-
-# 输出规范
-- 用简体中文输出结构化项目概览：模块名与依赖、入口、目录组织、关键类型与函数、值得注意的设计点。
-- 引用代码位置时使用「文件:行号」格式。`
-
 // BuildProjectContext 构建 explorer 的动态上下文尾部（稳定前缀之后追加）。
 func BuildProjectContext(ws *workspace.Manager) (string, error) {
 	root := ws.Root()
@@ -42,6 +29,12 @@ func BuildProjectContext(ws *workspace.Manager) (string, error) {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "\n\n# 当前项目\nworkspace: %s\n", root)
 
+	// 语言/构建系统线索：不假设项目是 Go
+	markers := projectMarkers(root)
+	if len(markers) > 0 {
+		fmt.Fprintf(&sb, "\n## 项目文件\n- %s\n", strings.Join(markers, "\n- "))
+	}
+
 	if mi, err := indexer.ParseGoMod(root); err == nil {
 		fmt.Fprintf(&sb, "\n## Go Module\nmodule: %s\ngo: %s\n", mi.Module, mi.GoVersion)
 		if len(mi.Deps) > 0 {
@@ -50,8 +43,8 @@ func BuildProjectContext(ws *workspace.Manager) (string, error) {
 				fmt.Fprintf(&sb, "- %s\n", d)
 			}
 		}
-	} else {
-		sb.WriteString("\n（非 Go Module 项目或未找到 go.mod）\n")
+	} else if len(markers) == 0 {
+		sb.WriteString("\n（未检测到常见构建/包管理文件）\n")
 	}
 
 	if eps, err := indexer.FindEntryPoints(root); err == nil && len(eps) > 0 {
@@ -86,6 +79,28 @@ func BuildProjectContext(ws *workspace.Manager) (string, error) {
 	return sb.String(), nil
 }
 
+// projectMarkers 返回项目根目录下常见的构建/包管理文件名（语言与构建系统线索）。
+func projectMarkers(root string) []string {
+	candidates := []string{
+		"go.mod", "package.json", "pnpm-lock.yaml", "yarn.lock", "package-lock.json",
+		"pyproject.toml", "requirements.txt", "Pipfile", "Cargo.toml",
+		"pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle",
+		"composer.json", "Gemfile", "Makefile", "CMakeLists.txt", "Dockerfile",
+	}
+	var found []string
+	for _, name := range candidates {
+		if _, err := os.Stat(filepath.Join(root, name)); err == nil {
+			found = append(found, name)
+		}
+	}
+	if matches, _ := filepath.Glob(filepath.Join(root, "*.csproj")); len(matches) > 0 {
+		for _, m := range matches {
+			found = append(found, filepath.Base(m))
+		}
+	}
+	return found
+}
+
 // readExcerpt 读取文件前 limit 字节（不存在返回空串）。
 // 按 UTF-8 边界截断，避免把中文等多字节字符切成半个。
 func readExcerpt(root, name string, limit int) string {
@@ -117,9 +132,10 @@ func BuildExplorer(ctx context.Context, ws *workspace.Manager, cm model.BaseChat
 	}
 	toolList = append(toolList, summaryTool)
 
-	instruction := ExplorerInstruction
-	if dyn, err := BuildProjectContext(ws); err == nil {
-		instruction += dyn
+	projectCtx, _ := BuildProjectContext(ws)
+	instruction, err := renderExplorerPrompt(PromptData{ProjectContext: projectCtx})
+	if err != nil {
+		return nil, err
 	}
 
 	return adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
@@ -167,20 +183,24 @@ func OrchestratorTools(ctx context.Context, ws *workspace.Manager, cm model.Base
 }
 
 // BuildOrchestrator 构建主 Agent（含 explorer 分派工具 + 写操作审批工具 + 执行工具 + MCP 工具）。
-// extras 为追加到稳定提示词尾部的动态上下文；extraTools 为外部 MCP 工具。
+// prompt 为动态提示词数据（项目上下文 / Skills / MCP / 项目 Agent）；extraTools 为外部 MCP 工具。
 func BuildOrchestrator(ctx context.Context, ws *workspace.Manager, cm model.BaseChatModel,
 	appr *approval.Manager, backupRoot, sessionID string, whitelist []string,
-	extras string, extraTools []tool.BaseTool) (adk.Agent, error) {
+	prompt PromptData, extraTools []tool.BaseTool) (adk.Agent, error) {
 	orchTools, err := OrchestratorTools(ctx, ws, cm, appr, backupRoot, sessionID, whitelist, extraTools)
 	if err != nil {
 		return nil, err
 	}
-	instruction := OrchestratorInstruction
-	if dyn, err := BuildProjectContext(ws); err == nil {
-		instruction += dyn
+	// 项目上下文由 ws 生成；Skills / MCP / 项目 Agent 由调用方提供（稳定前缀之后追加）
+	if prompt.ProjectContext == "" {
+		if dyn, perr := BuildProjectContext(ws); perr == nil {
+			prompt.ProjectContext = dyn
+		}
 	}
-	// 动态尾部：Skills / MCP / 项目自定义 Agent 配置（稳定前缀之后追加）
-	instruction += extras
+	instruction, err := renderOrchestratorPrompt(prompt)
+	if err != nil {
+		return nil, err
+	}
 	return adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
 		Name:        "orchestrator",
 		Description: "ai-dog-agent 主 Agent，负责理解意图、制定计划、编排子 Agent",
@@ -196,11 +216,15 @@ func BuildOrchestrator(ctx context.Context, ws *workspace.Manager, cm model.Base
 
 // newPlainOrchestrator 未设置 workspace 时的纯对话主 Agent（仍可携带 MCP 工具）。
 func newPlainOrchestrator(ctx context.Context, cm model.BaseChatModel,
-	extras string, extraTools []tool.BaseTool) (adk.Agent, error) {
+	prompt PromptData, extraTools []tool.BaseTool) (adk.Agent, error) {
+	instruction, err := renderOrchestratorPrompt(prompt)
+	if err != nil {
+		return nil, err
+	}
 	cfg := &adk.ChatModelAgentConfig{
 		Name:             "orchestrator",
 		Description:      "ai-dog-agent 主 Agent",
-		Instruction:      OrchestratorInstruction + extras,
+		Instruction:      instruction,
 		Model:            cm,
 		ModelRetryConfig: retryConfig(),
 	}

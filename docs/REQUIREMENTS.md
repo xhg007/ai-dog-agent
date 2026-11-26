@@ -43,7 +43,7 @@ ai-dog-agent 是一个运行在用户桌面上的 AI 编码 Agent 工具：用�
 | 工作流 | Eino Graph / Workflow | 多步骤确定性流程（如「理解项目」管线） |
 | 模型适配 | `eino-ext/components/model/openai`（OpenAI 兼容协议，**自填 Base URL/Key/Model**） | 一个配置覆盖 DeepSeek / Qwen / GLM / OpenAI，多模型故障切换 |
 | 工具协议 | `github.com/modelcontextprotocol/go-sdk` | 内置工具可直接注册；预留 MCP Client 接入外部工具 |
-| 代码索引 | **M2 已落地**：Go 项目用标准库 go/parser + go/ast 提取符号表（精确、无 CGO 依赖）；引用分析用正则 + 词边界；tree-sitter 作为多语言支持延后到 M6；向量检索后置 | 首个目标语言为 Go，stdlib AST 即可实现用户决策的「AST 符号 + 正则引用」 |
+| 代码索引 | **M2 已落地**：Go 项目用标准库 go/parser + go/ast 提取符号表（精确、无 CGO 依赖）；引用分析用正则 + 词边界；其他语言暂用文件/文本工具（read/list/search）理解，tree-sitter 多语言索引延后到 M6；向量检索后置 | 产品语言无关；Go 为首个一等支持，stdlib AST 即可实现用户决策的「AST 符号 + 正则引用」 |
 | 任务执行隔离 | 独立 workspace + 独立 `context.Context` + 并发上限 | 每个 Task 一个独立执行域 |
 | 可观测性 | Eino Callback + OpenTelemetry（OTLP 导出，可选开关） | Trace/Token 统计 |
 | GUI | Wails3 + React + TypeScript | 事件用 Wails Event 双向推送 |

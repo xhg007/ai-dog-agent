@@ -296,7 +296,7 @@ func (s *ChatService) initAgentLocked(sess *chatSession) error {
 		return err
 	}
 
-	extras := s.buildDynamicExtras()
+	prompt := s.buildPromptData()
 	// 外部 MCP 工具：启用的 server 懒连接并包装；单个 server 失败只跳过（不阻塞会话）
 	var mcpTools []tool.BaseTool
 	if s.mcpMgr != nil {
@@ -306,10 +306,10 @@ func (s *ChatService) initAgentLocked(sess *chatSession) error {
 	if s.ws.IsSet() {
 		// workspace 已设置：主 Agent 携带 explorer 分派工具 + 写操作审批工具 + 执行工具 + MCP 工具
 		ag, err = BuildOrchestrator(ctx, s.ws, cm, s.appr, s.backupRoot, sess.id,
-			s.cfg.ShellWhitelist(), extras, mcpTools)
+			s.cfg.ShellWhitelist(), prompt, mcpTools)
 	} else {
 		// 未设置 workspace：纯对话模式（仍可携带 MCP 工具）
-		ag, err = newPlainOrchestrator(ctx, cm, extras, mcpTools)
+		ag, err = newPlainOrchestrator(ctx, cm, prompt, mcpTools)
 	}
 	if err != nil {
 		return fmt.Errorf("构建 Agent 失败: %w", err)
@@ -328,54 +328,27 @@ func (s *ChatService) initAgentLocked(sess *chatSession) error {
 	return nil
 }
 
-// buildDynamicExtras 构建追加到稳定提示词尾部的动态上下文：
-// 已启用的 Skills、MCP Server 以及项目自定义子 Agent 配置。
-func (s *ChatService) buildDynamicExtras() string {
+// buildPromptData 构建追加到稳定提示词尾部的动态数据：
+// 已启用的 Skills、MCP Server 以及项目自定义子 Agent 配置（文本由模板渲染）。
+func (s *ChatService) buildPromptData() PromptData {
 	cfg := s.cfg.Get()
-	var sb strings.Builder
-
-	var skills []config.SkillConfig
+	var data PromptData
 	for _, sk := range cfg.Skills {
 		if sk.Enabled {
-			skills = append(skills, sk)
+			data.Skills = append(data.Skills, sk)
 		}
 	}
-	if len(skills) > 0 {
-		sb.WriteString("\n\n# 已启用 Skills\n")
-		for _, sk := range skills {
-			fmt.Fprintf(&sb, "- %s：%s\n", sk.Name, sk.Description)
-			if sk.Prompt != "" {
-				fmt.Fprintf(&sb, "  指令：%s\n", sk.Prompt)
-			}
-		}
-	}
-
-	var servers []config.MCPServerConfig
 	for _, m := range cfg.MCPServers {
 		if m.Enabled {
-			servers = append(servers, m)
+			data.MCPServers = append(data.MCPServers, m)
 		}
 	}
-	if len(servers) > 0 {
-		// 只列名称：Command/Args/URL 可能含密钥（例如 URL query 里的 token），
-		// 系统提示词会随每次模型请求上送供应商，不应携带连接凭据。
-		sb.WriteString("\n\n# 已启用 MCP Server（工具已注入，名为 mcp_<server>_<tool>，调用需用户审批）\n")
-		for _, m := range servers {
-			fmt.Fprintf(&sb, "- %s\n", m.Name)
-		}
-	}
-
 	if s.ws.IsSet() {
-		if specs, err := agentspec.List(s.ws.Root()); err == nil && len(specs) > 0 {
-			sb.WriteString("\n\n# 项目自定义子 Agent（.aidog/agents/*.json）\n")
-			for _, sp := range specs {
-				fmt.Fprintf(&sb, "- %s：%s（工具: %s；技能: %s；MCP: %s）\n",
-					sp.Name, sp.Description,
-					strings.Join(sp.Tools, ","), strings.Join(sp.Skills, ","), strings.Join(sp.MCPServers, ","))
-			}
+		if specs, err := agentspec.List(s.ws.Root()); err == nil {
+			data.Agents = specs
 		}
 	}
-	return sb.String()
+	return data
 }
 
 // runTurn 执行一轮对话：回放持久化历史，消费事件流并转发到前端，同时落盘消息。

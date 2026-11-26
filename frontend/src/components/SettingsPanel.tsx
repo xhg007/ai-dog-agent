@@ -642,6 +642,7 @@ function SettingsPanel({ onDirtyChange }: { onDirtyChange?: (dirty: boolean) => 
             <h3>Shell 白名单</h3>
             <p className="hint">
               run_shell 白名单内的命令免审批直接执行；白名单外命令需用户批准。
+              其他语言（如 node / python / cargo / mvn）把对应构建、测试命令加入白名单即可免审批，未加入则逐次审批。
               go 仅放行 build/test/vet/fmt/version；git 仅放行 status/diff/log/show 与 branch 的列分支形式（如 branch -a），
               branch -D/-m、push/commit/reset 等写操作一律需审批（不受白名单影响）。
               保存后对当前会话下一轮生效。

@@ -290,7 +290,7 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, runningHint
             <h2>ai-dog-agent</h2>
             <p>多 Agent 编码开发助手 · 主 Agent 已就绪</p>
             {wsPath
-              ? <p>工作区已就绪。试试：<span className="text-primary">「理解一下这个项目」</span> — 主 Agent 会分派 explorer 子 Agent 分析结构、依赖、入口与符号。</p>
+              ? <p>工作区已就绪。试试：<span className="text-primary">「理解一下这个项目」</span> — 主 Agent 会分派 explorer 子 Agent 分析语言与构建方式、依赖、入口与关键模块。</p>
               : <p>在左侧「项目」中选择目录后，即可进行项目理解与代码探索。</p>}
           </div>
         )}
