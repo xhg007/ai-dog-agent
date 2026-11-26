@@ -11,9 +11,11 @@
 
 ## 架构要点
 
-- **主 Agent（Orchestrator）**：常驻编排，制定计划、分派子 Agent。
-- **子 Agent**：配置随项目走（workspace 内 `.aidog/agents/*.json`），独立上下文 / skill / MCP / function call。
-- **后台 Meta Agent**：专职优化与创造子 Agent 配置。
+- **主 Agent（Orchestrator）**：常驻编排，制定计划、分派子 Agent；按项目 Agent 列表动态生成 `dispatch_<name>` 工具。
+- **子 Agent**：配置随项目走（workspace 内 `.aidog/agents/*.json`），独立上下文 / skill / MCP / function call / 模型；空工具默认只读。
+- **执行上限**：步骤、Token、时间、工具次数、预算、重试六项上限，由 Agent Runtime 统一计数并以结构化原因终止。
+- **项目级配置**：`.aidog/main.json`（主 Agent 覆盖）、`mcp_servers.json`、`skills.json` 与全局配置在运行时合并，不写回全局。
+- **后台 Meta Agent**：专职优化与创造子 Agent 配置（阶段 D，未实现）。
 - **上下文前缀稳定**：系统提示词静态前缀在前、动态内容追加在后，保证提示词缓存命中。
 - **会话持久化**：会话元数据与消息历史按会话落盘 `%AppData%/ai-dog-agent/sessions/*.json`，关闭软件后线程列表与对话记录可恢复，并在后续轮次回放历史。
 - **配置**：设置页提供模型（OpenAI 兼容）、Skills、MCP Server 以及项目级子 Agent（`.aidog/agents/*.json`）的可视化编辑；启用项追加到主 Agent 动态上下文。
@@ -64,3 +66,4 @@ go test ./internal/...
 | M3 写操作 + 审批（write/edit + 审批卡片 + 备份回滚 API） | 完成 |
 | M4 执行与修复（run_shell + go_test/vet/build + 白名单 + 回滚 UI） | 完成 |
 | M5 生产化（DuckDB 持久化 + 任务面板 + 断点恢复 + Token 统计 + 模型故障切换） | 完成（OTLP tracing 延后，统计走 DuckDB） |
+| M6 多 Agent 运行时（阶段 A：身份/模型路由/配置分层/Runtime 上限/work agent/动态分派） | 完成；阶段 B–E 待办 |

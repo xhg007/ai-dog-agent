@@ -1,7 +1,8 @@
 # 多 Agent 协作、Agent Runtime 与任务状态机设计
 
 日期：2026-11-26
-状态：设计（未实现）
+状态：阶段 A 已实现（2026-11-26）；阶段 B–E 未实现。实施记录见
+`docs/superpowers/plans/2026-11-26-multi-agent-runtime.md`。
 
 ## 1. 设计理念与已确认决策
 
@@ -33,17 +34,21 @@
 
 | 设计 | 当前实现 | 差距 |
 |---|---|---|
-| 每个 Agent 唯一 `agent_id` | 主 Agent：`internal/agent/identity.go`；`internal/llm/factory.go` 注入请求体 | 主 Agent ✅；work agent 复用主 model，请求体仍为主 ID ❌ |
-| `agent_id` / `user_id` 分离 | `extraFields` 把两者设为同一值 | 仅主 Agent 可用 |
-| work agent 固定 ID、独立模型 | `Spec.AgentID` / `Spec.Model` 仅配置层 | 运行时未使用 |
-| work agent 独立上下文/工具/MCP/Skill | 仅 explorer（只读） | `Spec.Tools/Skills/MCPServers` 未生效 |
-| 主 Agent 编排/初始化 | 只有硬编码 `dispatch_explorer` | 无法分派自定义 Agent |
-| agent-to-agent 私聊 | 无 | 未实现 |
-| agent-smith | 无 | 未实现 |
-| 配置分层（全局/项目级） | 全局 `config.json` + 项目 `.aidog/agents/*.json`；设置页混合展示 | 项目级主 Agent 覆盖缺失 |
-| 上下文压缩 | 无（会话历史全量回放） | 未实现 |
-| 执行上限（步骤/Token/时间/工具次数/预算/重试） | 仅 `ModelRetryConfig` 与 shell 超时 | 未实现 |
-| 任务状态机 | `running/completed/failed/interrupted` | 缺少 PENDING/READY/ASSIGNED/BLOCKED/REVIEW 等 |
+| 每个 Agent 唯一 `agent_id` | 主 Agent：`internal/agent/identity.go`；work agent：`Spec.AgentID` | ✅ 阶段 A |
+| `agent_id` / `user_id` 分离 | `extraFields` 分别注入；work agent 用自身 ID + 主 Agent user_id | ✅ 阶段 A |
+| work agent 固定 ID、独立模型 | `BuildWorkAgent` + `BuildWorkModelChain` | ✅ 阶段 A |
+| work agent 独立上下文/工具/MCP/Skill | `tools.Catalog` + `BuildWorkAgent` | ✅ 阶段 A |
+| 主 Agent 编排/初始化 | `buildDispatchTools` 生成 `dispatch_<name>` | ✅ 阶段 A |
+| agent-to-agent 私聊 | 无 | 阶段 C |
+| agent-smith | 无 | 阶段 D |
+| 配置分层（全局/项目级） | `.aidog/main.json` + `mcp_servers.json` + `skills.json`，`Effective` 合并 | ✅ 阶段 A（配置页分组留 E） |
+| 上下文压缩 | 无（会话历史全量回放） | 阶段 E |
+| 执行上限（步骤/Token/时间/工具次数/预算/重试） | `Execution` 计数 + `context.WithTimeout` + 结构化 LimitError | ✅ 阶段 A（重试沿用 ADK） |
+| 任务状态机 | `running/completed/failed/interrupted` | 阶段 B |
+
+附带问题（已修复）：原 `internal/agent/instruction.go` 要求分派“项目级子 Agent”但只有
+`dispatch_explorer`；现已改为 `internal/agent/prompts.go` 模板化提示词，并按实际构建成功的
+work agent 动态生成 `Dispatches`，提示词与工具集一致。
 
 附带问题：`internal/agent/instruction.go` 要求分派“项目级子 Agent”，但工具集只有
 `dispatch_explorer`，提示词与工具不一致。
