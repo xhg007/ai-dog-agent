@@ -150,9 +150,16 @@ func (m *Manager) Save(cfg Config) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// 先落盘成功再更新内存与版本：否则写盘失败时配置已在内存生效，
+	// 前端看到「保存失败」但 Agent 实际用了未落盘的新配置，重启后又丢失。
+	prev := m.cfg
 	m.cfg = clone(cfg)
+	if err := m.persistLocked(); err != nil {
+		m.cfg = prev
+		return err
+	}
 	m.version++
-	return m.persistLocked()
+	return nil
 }
 
 // Version 返回配置版本（每次成功保存递增）。会话用它判断 Agent 是否需要
