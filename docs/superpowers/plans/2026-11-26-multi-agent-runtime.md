@@ -139,18 +139,26 @@
 - [x] `.aidog` 首次信任确认 + 持久化；审计规则自动拉黑高危；解除拉黑需二次确认。
 - [x] 测试：估算/阈值/摘要/降级/事件/冷却、审计规则、拉黑/信任/持久化。
 
+### 阶段 F：可靠性收口（已完成 2026-11-26）
+
+- [x] 私聊历史持久化：`sessions/<id>/agent-chats/<agentID>.jsonl` + 配置指纹；重启恢复，提示词/工具/Skill/MCP/模型变化或配置重建时丢弃。
+- [x] MCP 连接上限：默认 16（`DefaultMaxConnections`），超限回收最久未用且空闲的连接（`inflight` 保护）；全部在用时本次放行。
+- [x] ErrMaxRetries 独立触发：ADK `RetryExhaustedError` 归一为 `ErrMaxRetries`（含重试次数与最后错误），接入主 Agent 与私聊错误路径。
+- [x] dispatch 与私聊串行化：dispatch 工具与私聊共用 `agentSession.mu`，锁覆盖整个事件流；explorer 保持无锁并行。
+- [x] 测试：历史恢复/指纹丢弃/上限截断/会话清理、LRU 选择与在用保护、重试错误判定、共享锁串行。
+
 ## 已知限制与风险
 
-- **ErrMaxRetries**：已定义但 ADK 内部重试用尽后以普通错误上报，暂未形成独立触发点。
+- **ErrMaxRetries**：ADK 重试用尽错误经 `ClassifyModelError` 归一为 `ErrMaxRetries`（含重试次数与最后错误），主 Agent 与私聊均按此上报。
 - **超限边界**：ADK `MaxIterations` 与 Runtime 外层计数可能相差一次调用；两者同时存在，超限原因以 Runtime 计数为准。
 - **项目配置信任**：已实现首次确认 + 持久化 + 自动审计；审计为启发式规则，不保证查杀所有后门；强制信任后不再自动拉黑。
-- **MCP 连接数**：每个 work agent 独立 MCP 集合可能启动多个子进程；`mcp.Manager` 按 server+workdir 复用连接，后续仍需上限策略。
+- **MCP 连接数**：默认上限 16，超限回收最久未用的空闲连接；全部连接都在执行工具时本次放行（临时超限），下次再回收。
 - **usage 缺失**：端点不返回 usage 时预算无法判定，仅记录日志，不静默通过。
 - **配置页**：已完成全局/项目分组；「项目设置」tab 承载 work agent 完整编辑、主 Agent 覆盖与项目专属 MCP/Skill。
 - **上下文压缩**：摘要可能丢失关键约束；失败时降级规则截断并保留最近轮；压缩本身消耗预算并计入上限。
 - **agent-smith 自动触发**：默认关闭；开启后失败/取消会自动消耗一次主模型调用。
 - **smith 修改范围**：每次只处理一个 work agent 的一次修改，不批量；不改主 Agent/全局配置。
 - **smith 备份**：`.aidog/agents/.backup` 保留最近 10 份；跨项目各自独立。
-- **私聊历史**：Registry 仅内存保存最近 40 条，跨重启不保留；后续可持久化。
-- **dispatch 与私聊并发**：dispatch 仍走 `adk.NewAgentTool`，不读写私聊历史；同一 Agent 的 dispatch 与私聊可能并发（已确认取舍）。
+- **私聊历史**：最近 40 条落盘到 `sessions/<id>/agent-chats/`，重启后按配置指纹恢复；提示词/工具/Skill/MCP/模型变化会丢弃旧历史。
+- **dispatch 与私聊并发**：dispatch 仍走 `adk.NewAgentTool`，不读写私聊历史；与私聊共用 `agentSession.mu`，同一 Agent 串行执行。
 - **私聊目标**：主 Agent 不作为私聊目标（避免与主运行冲突）；work→主会返回明确错误。

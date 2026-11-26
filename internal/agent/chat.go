@@ -85,6 +85,7 @@ func NewChatService(cfg *config.Manager, ws *workspace.Manager, bus *eventbus.Bu
 	mcpMgr *mcp.Manager) *ChatService {
 	reg := NewRegistry()
 	reg.SetBus(bus)
+	reg.SetChatStore(sessionDir) // 私聊历史随会话目录落盘，重启后恢复
 	s := &ChatService{
 		cfg:        cfg,
 		ws:         ws,
@@ -461,11 +462,16 @@ func (s *ChatService) buildDispatchTools(ctx context.Context, sess *chatSession,
 			continue
 		}
 		seen[wa.ToolName] = true
+		var lock *sync.Mutex
 		if s.registry != nil {
-			s.registry.Register(sess.id, wa) // 配置重建覆盖时清空该 Agent 私聊历史
+			// dispatch 与私聊共用同一把会话锁：同一 Agent 的两份执行串行，
+			// 配置重建覆盖时仍清空该 Agent 私聊历史
+			if as := s.registry.Register(sess.id, wa); as != nil {
+				lock = &as.mu
+			}
 		}
 		out = append(out, adk.NewAgentTool(ctx, &agentWithIdentity{
-			Agent: wa.Agent, agentID: spec.AgentID, model: wa.Model,
+			Agent: wa.Agent, agentID: spec.AgentID, model: wa.Model, lock: lock,
 		}))
 		infos = append(infos, DispatchInfo{Name: wa.ToolName, Description: spec.Description})
 	}
@@ -708,9 +714,11 @@ func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
 				finishLimited(terr)
 				return
 			}
-			slog.Error("Agent 执行错误", "session", sessionID, "err", ev.Err)
-			emitError(ev.Err.Error())
-			finishTask(store.StatusFailed, truncateTitle(ev.Err.Error()))
+			// 模型重试用尽（ADK RetryExhaustedError）归一为 ErrMaxRetries，失败原因可区分
+			err := ClassifyModelError(ev.Err)
+			slog.Error("Agent 执行错误", "session", sessionID, "err", err)
+			emitError(err.Error())
+			finishTask(store.StatusFailed, truncateTitle(err.Error()))
 			return
 		}
 		mo := ev.Output.MessageOutput

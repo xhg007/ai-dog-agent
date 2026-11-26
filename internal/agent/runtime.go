@@ -137,6 +137,41 @@ func (e *LimitError) Error() string {
 // Unwrap 支持 errors.Is(err, ErrMaxSteps) 等判断。
 func (e *LimitError) Unwrap() error { return e.Sentinel }
 
+// RetryExhaustedError 模型重试用尽的结构化错误：
+// errors.Is(err, ErrMaxRetries) 可判定，并携带重试次数与最后一次错误。
+type RetryExhaustedError struct {
+	TotalRetries int
+	LastErr      error
+}
+
+func (e *RetryExhaustedError) Error() string {
+	if e.LastErr != nil {
+		return fmt.Sprintf("%s（重试 %d 次后仍失败: %v）",
+			ErrMaxRetries.Error(), e.TotalRetries, e.LastErr)
+	}
+	return fmt.Sprintf("%s（重试 %d 次）", ErrMaxRetries.Error(), e.TotalRetries)
+}
+
+func (e *RetryExhaustedError) Unwrap() error { return ErrMaxRetries }
+
+// ClassifyModelError 把框架层的重试用尽错误归一为 ErrMaxRetries。
+// ADK 在 ModelRetryConfig.MaxRetries 用尽后返回 *adk.RetryExhaustedError
+// （Unwrap 为 adk.ErrExceedMaxRetries）；此前它会以普通错误上报，
+// 失败原因无法与其它执行错误区分。
+func ClassifyModelError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var exhausted *adk.RetryExhaustedError
+	if errors.As(err, &exhausted) {
+		return &RetryExhaustedError{TotalRetries: exhausted.TotalRetries, LastErr: exhausted.LastErr}
+	}
+	if errors.Is(err, adk.ErrExceedMaxRetries) {
+		return &RetryExhaustedError{LastErr: err}
+	}
+	return err
+}
+
 // Usage 执行用量快照。
 type Usage struct {
 	Steps     int

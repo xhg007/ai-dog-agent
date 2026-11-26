@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -30,11 +31,17 @@ import (
 const (
 	clientName    = "ai-dog-agent"
 	clientVersion = "0.1.0"
+
+	// DefaultMaxConnections MCP 连接默认上限：超出时回收最久未用的空闲连接，
+	// 避免 work agent 配置过多导致 stdio 子进程/远程会话数量失控。
+	DefaultMaxConnections = 16
 )
 
 // Manager 管理 MCP Server 连接（按配置 ID 复用），并向 Agent 提供包装后的工具。
 type Manager struct {
 	appr *approval.Manager
+
+	maxSessions int // 连接上限；<=0 表示不限制
 
 	mu       sync.Mutex
 	sessions map[string]*serverSession
@@ -46,6 +53,9 @@ type serverSession struct {
 	workdir string // 连接建立时的子进程 cwd；切换 workspace 后必须重连
 	session *sdk.ClientSession
 	tools   []*sdk.Tool
+
+	lastUsed time.Time // 最近一次使用（装配或工具调用），LRU 回收依据
+	inflight int       // 正在执行的工具调用数；>0 时不回收
 }
 
 // matches 判断已连接会话能否复用于给定配置与工作目录。
@@ -56,7 +66,18 @@ func (ss *serverSession) matches(cfg config.MCPServerConfig, workdir string) boo
 
 // NewManager 创建 MCP 管理器；appr 为 nil 时所有工具调用会被拒绝。
 func NewManager(appr *approval.Manager) *Manager {
-	return &Manager{appr: appr, sessions: make(map[string]*serverSession)}
+	return &Manager{
+		appr:        appr,
+		maxSessions: DefaultMaxConnections,
+		sessions:    make(map[string]*serverSession),
+	}
+}
+
+// SetMaxConnections 调整连接上限（<=0 表示不限制）。
+func (m *Manager) SetMaxConnections(n int) {
+	m.mu.Lock()
+	m.maxSessions = n
+	m.mu.Unlock()
 }
 
 // Tools 确保启用的 server 已连接，并返回其全部工具的 Eino 包装。
@@ -111,7 +132,7 @@ func (m *Manager) wrap(cfg config.MCPServerConfig, ss *serverSession,
 			continue
 		}
 		out = append(out, &mcpTool{
-			session:    ss.session,
+			ss:         ss,
 			mgr:        m,
 			cfg:        cfg,
 			workdir:    workdir,
@@ -149,32 +170,104 @@ func (m *Manager) Close() {
 	m.sessions = make(map[string]*serverSession)
 	m.mu.Unlock()
 	for _, ss := range sessions {
-		if err := ss.session.Close(); err != nil {
-			slog.Warn("关闭 MCP Server 失败", "server", ss.cfg.Name, "err", err)
-		}
+		closeSession(ss)
 	}
 }
 
+// closeSession 关闭单个连接；nil 连接（测试构造/已失效）静默跳过。
+func closeSession(ss *serverSession) {
+	if ss == nil || ss.session == nil {
+		return
+	}
+	if err := ss.session.Close(); err != nil {
+		slog.Warn("关闭 MCP Server 失败", "server", ss.cfg.Name, "err", err)
+	}
+}
+
+// beginUse / endUse 标记一次工具调用，供 LRU 回收判断连接是否空闲。
+func (m *Manager) beginUse(ss *serverSession) {
+	if ss == nil {
+		return
+	}
+	m.mu.Lock()
+	ss.inflight++
+	ss.lastUsed = time.Now()
+	m.mu.Unlock()
+}
+
+func (m *Manager) endUse(ss *serverSession) {
+	if ss == nil {
+		return
+	}
+	m.mu.Lock()
+	if ss.inflight > 0 {
+		ss.inflight--
+	}
+	m.mu.Unlock()
+}
+
+// pickVictimLocked 在连接数达到上限时选出最久未用的空闲连接并从表中移除（调用方持锁）。
+// 所有连接都在执行工具时返回 nil（本次放行，下次再回收）。
+func (m *Manager) pickVictimLocked(exceptID string) *serverSession {
+	if m.maxSessions <= 0 || len(m.sessions) < m.maxSessions {
+		return nil
+	}
+	var victimID string
+	var victim *serverSession
+	for id, ss := range m.sessions {
+		if id == exceptID || ss.inflight > 0 {
+			continue
+		}
+		if victim == nil || ss.lastUsed.Before(victim.lastUsed) {
+			victimID, victim = id, ss
+		}
+	}
+	if victim == nil {
+		slog.Warn("MCP 连接数已达上限但没有空闲连接可回收，本次放行",
+			"sessions", len(m.sessions), "limit", m.maxSessions)
+		return nil
+	}
+	delete(m.sessions, victimID)
+	slog.Info("回收最久未用的 MCP 连接",
+		"server", victim.cfg.Name, "sessions", len(m.sessions), "limit", m.maxSessions)
+	return victim
+}
+
 // ensure 返回已连接会话；配置变化时关闭旧连接并重连。
+// 连接数达到上限时先回收最久未用且空闲的连接；dial 期间不持锁，避免阻塞其他 Server。
 func (m *Manager) ensure(ctx context.Context, cfg config.MCPServerConfig,
 	workdir string) (*serverSession, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if ss, ok := m.sessions[cfg.ID]; ok {
 		if ss.matches(cfg, workdir) {
+			ss.lastUsed = time.Now()
+			m.mu.Unlock()
 			return ss, nil
 		}
-		// 同一 ID 的命令/参数/环境/工作目录变化：重建连接
-		if err := ss.session.Close(); err != nil {
-			slog.Warn("重建 MCP 连接前关闭失败", "server", cfg.Name, "err", err)
-		}
+		// 同一 ID 的命令/参数/环境/工作目录变化：从表中移除，锁外关闭后重建
 		delete(m.sessions, cfg.ID)
+		m.mu.Unlock()
+		closeSession(ss)
+		return m.reconnect(ctx, cfg, workdir)
 	}
+	victim := m.pickVictimLocked(cfg.ID)
+	m.mu.Unlock()
+	closeSession(victim)
+
 	ss, err := dial(ctx, cfg, workdir)
 	if err != nil {
 		return nil, err
 	}
+	ss.lastUsed = time.Now()
+	m.mu.Lock()
+	// 并发 ensure 可能已建立同 ID 连接：保留先到的，关闭本次新建
+	if exist, ok := m.sessions[cfg.ID]; ok && exist.matches(cfg, workdir) {
+		m.mu.Unlock()
+		closeSession(ss)
+		return exist, nil
+	}
 	m.sessions[cfg.ID] = ss
+	m.mu.Unlock()
 	return ss, nil
 }
 
@@ -312,7 +405,7 @@ func headersClient(raw string) (*http.Client, error) {
 // session 可能因重连被替换，读写经 mu 保护。
 type mcpTool struct {
 	mu         sync.RWMutex
-	session    *sdk.ClientSession
+	ss         *serverSession // 持有连接会话：调用期间标记 inflight，重连后替换
 	mgr        *Manager
 	cfg        config.MCPServerConfig
 	workdir    string
@@ -325,15 +418,15 @@ type mcpTool struct {
 	readOnly   bool // 来自服务器声明的 readOnlyHint（不可完全信任）
 }
 
-func (t *mcpTool) currentSession() *sdk.ClientSession {
+func (t *mcpTool) serverSession() *serverSession {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	return t.session
+	return t.ss
 }
 
-func (t *mcpTool) setSession(cs *sdk.ClientSession) {
+func (t *mcpTool) setSession(ss *serverSession) {
 	t.mu.Lock()
-	t.session = cs
+	t.ss = ss
 	t.mu.Unlock()
 }
 
@@ -363,7 +456,22 @@ func (t *mcpTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 			return "", err
 		}
 	}
-	res, err := t.currentSession().CallTool(ctx, &sdk.CallToolParams{
+	ss := t.serverSession()
+	if ss == nil || ss.session == nil {
+		return "", fmt.Errorf("MCP 工具 %s 的连接已失效", t.toolName)
+	}
+	// 调用期间标记连接在用（LRU 不回收）；重连后切换到新连接
+	var used *serverSession
+	if t.mgr != nil {
+		used = ss
+		t.mgr.beginUse(used)
+	}
+	defer func() {
+		if used != nil && t.mgr != nil {
+			t.mgr.endUse(used)
+		}
+	}()
+	res, err := ss.session.CallTool(ctx, &sdk.CallToolParams{
 		Name:      t.toolName,
 		Arguments: args,
 	})
@@ -371,9 +479,14 @@ func (t *mcpTool) InvokableRun(ctx context.Context, argumentsInJSON string,
 		// 连接可能已失效（子进程退出/远程断开）：失效缓存并重连后重试一次
 		slog.Warn("MCP 工具调用失败，尝试重连后重试",
 			"server", t.serverName, "tool", t.toolName, "err", err)
-		if ss, rerr := t.mgr.reconnect(ctx, t.cfg, t.workdir); rerr == nil {
-			t.setSession(ss.session)
-			res, err = ss.session.CallTool(ctx, &sdk.CallToolParams{
+		// 先退出旧连接的使用计数，再重连（否则旧连接会被 LRU 视为在用）
+		t.mgr.endUse(used)
+		used = nil
+		if newSS, rerr := t.mgr.reconnect(ctx, t.cfg, t.workdir); rerr == nil {
+			t.setSession(newSS)
+			used = newSS
+			t.mgr.beginUse(newSS)
+			res, err = newSS.session.CallTool(ctx, &sdk.CallToolParams{
 				Name:      t.toolName,
 				Arguments: args,
 			})

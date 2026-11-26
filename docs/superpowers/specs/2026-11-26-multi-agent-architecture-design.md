@@ -358,7 +358,7 @@ PENDING → READY → ASSIGNED → RUNNING → REVIEW → COMPLETED
 - **上下文增长**：Registry 长期持有 work agent 历史，需要上限/淘汰策略。
 - **私聊递归/死锁**：A→B→A 需要深度限制与取消传播。
 - **审批归属**：work agent 的写/执行审批卡片需要显示发起 Agent。
-- **MCP 连接数**：每个 work agent 独立集合可能启动多个子进程，需要复用策略。
+- **MCP 连接数**：每个 work agent 独立集合可能启动多个子进程；`mcp.Manager` 按 server+workdir 复用连接，默认上限 16 并 LRU 回收空闲连接（阶段 F）。
 - **配置分层冲突**：项目级覆盖全局时的合并规则、删除全局项后的悬空引用。
 - **模型能力差异**：work agent 的工具 schema/提示词可能超出所选模型上下文窗口。
 - **成本统计**：金额优先用 API 返回的成本，缺失时按单价折算；供应商不返回 usage 时无法扣减预算（记录告警）。

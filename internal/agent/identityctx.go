@@ -6,6 +6,7 @@ package agent
 
 import (
 	"context"
+	"sync"
 
 	"github.com/cloudwego/eino/adk"
 
@@ -36,9 +37,34 @@ type agentWithIdentity struct {
 	adk.Agent
 	agentID string
 	model   config.ModelConfig
+	// lock 与私聊共享（agentSession.mu）：同一 Agent 的 dispatch 与私聊串行执行，
+	// 避免两份运行同时改动同一上下文/工具状态。explorer 等不注册会话的 Agent 为 nil。
+	lock *sync.Mutex
 }
 
 func (a *agentWithIdentity) Run(ctx context.Context, input *adk.AgentInput,
 	opts ...adk.AgentRunOption) *adk.AsyncIterator[*adk.AgentEvent] {
-	return a.Agent.Run(withAgentIdentity(ctx, a.agentID, a.model), input, opts...)
+	ctx = withAgentIdentity(ctx, a.agentID, a.model)
+	if a.lock == nil {
+		return a.Agent.Run(ctx, input, opts...)
+	}
+	// 锁必须覆盖整个事件流：Run 返回 iterator 时 Agent 尚未真正执行，
+	// 因此加锁后把事件转发到新 iterator，在转发 goroutine 结束时解锁。
+	a.lock.Lock()
+	inner := a.Agent.Run(ctx, input, opts...)
+	out, gen := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
+	go func() {
+		defer func() {
+			a.lock.Unlock()
+			gen.Close()
+		}()
+		for {
+			ev, ok := inner.Next()
+			if !ok {
+				return
+			}
+			gen.Send(ev)
+		}
+	}()
+	return out
 }

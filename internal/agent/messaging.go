@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -202,12 +203,20 @@ func (r *Registry) SendMessage(ctx context.Context, sessionID, from string,
 
 	reply, assistant, err := runSession(ctx, target.runner, input)
 	if err != nil {
-		return reply, err
+		return reply, ClassifyModelError(err)
 	}
 	target.history = append(target.history,
 		schema.UserMessage(content), assistant)
 	if len(target.history) > maxHistoryMessages {
 		target.history = target.history[len(target.history)-maxHistoryMessages:]
+	}
+	// 落盘私聊历史（含压缩/截断后的结果）：重启后由 Register 按指纹恢复
+	if r.chats != nil {
+		if err := r.chats.rewrite(sessionID, target.spec.AgentID,
+			specFingerprint(target.spec), target.history); err != nil {
+			slog.Warn("私聊历史落盘失败", "session", sessionID,
+				"agent", target.spec.AgentID, "err", err)
+		}
 	}
 	return reply, nil
 }

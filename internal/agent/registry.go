@@ -6,11 +6,12 @@ package agent
 //   - 同一 (session, agent) 串行，避免私聊上下文竞争；
 //   - 不同 Agent 各自持锁，可并行。
 //
-// dispatch_<name> 仍由 adk.NewAgentTool 生成，不经过 Registry；它不读写私聊历史，
-// 与私聊并发时互不污染（已知取舍，见设计文档阶段 C）。
+// dispatch_<name> 仍由 adk.NewAgentTool 生成，不经过 Registry 的私聊历史；
+// 但它与私聊共用 agentSession.mu，同一 Agent 的两份执行串行（见设计文档阶段 F）。
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -43,12 +44,20 @@ type agentSession struct {
 type Registry struct {
 	mu       sync.Mutex
 	bus      *eventbus.Bus
+	chats    *agentChatStore                     // 私聊历史持久化（nil 时不落盘）
 	sessions map[string]map[string]*agentSession // sessionID -> agentID -> session
 }
 
 // NewRegistry 创建注册表。
 func NewRegistry() *Registry {
 	return &Registry{sessions: make(map[string]map[string]*agentSession)}
+}
+
+// SetChatStore 注入私聊历史存储目录（会话根目录 sessions/）；为空时关闭持久化。
+func (r *Registry) SetChatStore(sessionDir string) {
+	r.mu.Lock()
+	r.chats = newAgentChatStore(sessionDir)
+	r.mu.Unlock()
 }
 
 // SetBus 注入事件总线（压缩事件推送用；测试可省略）。
@@ -58,8 +67,9 @@ func (r *Registry) SetBus(bus *eventbus.Bus) {
 	r.mu.Unlock()
 }
 
-// Register 注册/覆盖一个 work agent 会话。覆盖时清空该 Agent 的私聊历史
-// （配置重建后旧历史对新的提示词/工具集不再有意义）。
+// Register 注册/覆盖一个 work agent 会话。
+//   - 首次注册（应用启动后首次构建）：从磁盘恢复上次私聊历史（配置指纹不符则丢弃）；
+//   - 覆盖注册（配置重建）：旧历史对新的提示词/工具集不再有意义，清空内存与磁盘。
 func (r *Registry) Register(sessionID string, wa *WorkAgent) *agentSession {
 	as := &agentSession{
 		spec:  wa.Spec,
@@ -71,13 +81,27 @@ func (r *Registry) Register(sessionID string, wa *WorkAgent) *agentSession {
 		}),
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	m := r.sessions[sessionID]
 	if m == nil {
 		m = make(map[string]*agentSession)
 		r.sessions[sessionID] = m
 	}
+	_, existed := m[wa.Spec.AgentID]
 	m[wa.Spec.AgentID] = as
+	chats := r.chats
+	r.mu.Unlock()
+
+	switch {
+	case chats == nil:
+	case existed:
+		chats.remove(sessionID, wa.Spec.AgentID)
+	default:
+		as.history = chats.load(sessionID, wa.Spec.AgentID, specFingerprint(wa.Spec))
+		if len(as.history) > 0 {
+			slog.Info("恢复私聊历史", "session", sessionID,
+				"agent", wa.Spec.AgentID, "messages", len(as.history))
+		}
+	}
 	return as
 }
 
@@ -104,11 +128,15 @@ func (r *Registry) Lookup(sessionID, ref string) (*agentSession, bool) {
 	return nil, false
 }
 
-// RemoveSession 删除一个会话的全部 Agent 会话（会话删除/服务退出时调用）。
+// RemoveSession 删除一个会话的全部 Agent 会话与私聊历史（会话删除/服务退出时调用）。
 func (r *Registry) RemoveSession(sessionID string) {
 	r.mu.Lock()
 	delete(r.sessions, sessionID)
+	chats := r.chats
 	r.mu.Unlock()
+	if chats != nil {
+		chats.removeSession(sessionID)
+	}
 }
 
 // Count 返回指定会话已注册的 Agent 数量（测试与诊断用）。
