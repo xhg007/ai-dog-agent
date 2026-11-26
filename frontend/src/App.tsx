@@ -9,9 +9,10 @@ import ThreadPanel from './components/ThreadPanel'
 import ReviewPanel from './components/ReviewPanel'
 import SettingsPanel from './components/SettingsPanel'
 import ConfirmDialog from './components/ConfirmDialog'
+import ProjectTrustDialog from './components/ProjectTrustDialog'
 import { PendingApproval } from './components/ApprovalCard'
 import { ChatService } from '../bindings/ai-dog-agent/internal/agent/index.js'
-import { WorkspaceService, ApprovalService } from '../bindings/ai-dog-agent/internal/service/index.js'
+import { WorkspaceService, ApprovalService, ConfigService } from '../bindings/ai-dog-agent/internal/service/index.js'
 
 export interface ThreadInfo {
   id: string
@@ -43,6 +44,9 @@ function App() {
   const [approvalsByThread, setApprovalsByThread] = useState<Record<string, PendingApproval[]>>({})
   const [settingsDirty, setSettingsDirty] = useState(false)
   const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false)
+  const [projectTrust, setProjectTrust] = useState<any>(null)
+  const [trustBusy, setTrustBusy] = useState(false)
+  const trustCheckedFor = useRef('')
   // 面板开关与宽度（持久化到 localStorage）
   const [sidebarOpen, setSidebarOpen] = useState(() => readBool('aidog.sidebarOpen', true))
   const [reviewOpen, setReviewOpen] = useState(() => readBool('aidog.reviewOpen.v2', false))
@@ -101,6 +105,43 @@ function App() {
       setThreads(list as ThreadInfo[])
     } catch { /* 忽略 */ }
   }, [])
+
+  // 首次加载/切换项目时检查 .aidog 信任状态；trusted 不打扰
+  useEffect(() => {
+    if (!wsPath) return
+    if (trustCheckedFor.current === wsPath) return
+    trustCheckedFor.current = wsPath
+    ConfigService.GetProjectStatus()
+      .then((st: any) => {
+        if (st && (st.status === 'untrusted' || st.status === 'blocked')) {
+          setProjectTrust(st)
+        }
+      })
+      .catch(() => { /* 未设置工作区等 */ })
+  }, [wsPath, activeId])
+
+  const trustProject = async () => {
+    setTrustBusy(true)
+    try {
+      await ConfigService.TrustProject()
+      setProjectTrust(null)
+      refreshThreads()
+    } catch { /* 保持弹窗，等待用户处理 */ }
+    finally { setTrustBusy(false) }
+  }
+
+  const unblockTrustProject = async () => {
+    setTrustBusy(true)
+    try {
+      await ConfigService.UnblockProject()
+      await ConfigService.TrustProject()
+      setProjectTrust(null)
+      refreshThreads()
+    } catch { /* 保持弹窗 */ }
+    finally { setTrustBusy(false) }
+  }
+
+  const dismissTrust = () => setProjectTrust(null)
 
   useEffect(() => {
     // 初始化：创建首个线程并载入历史
@@ -345,6 +386,14 @@ function App() {
           setPage('chat')
         }}
         onCancel={() => setLeaveConfirmOpen(false)}
+      />
+      <ProjectTrustDialog
+        open={projectTrust !== null}
+        status={projectTrust}
+        busy={trustBusy}
+        onTrust={trustProject}
+        onUnblockTrust={unblockTrustProject}
+        onDismiss={dismissTrust}
       />
     </TooltipProvider>
   )

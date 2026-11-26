@@ -20,12 +20,13 @@ const (
 	EvApprovalDecided = "approval_decided" // 审批已决策（前端移除卡片）
 
 	// M5 生产化事件（FR-5.1），同时落库 task_events 表
-	EvTaskState     = "task_state"     // 任务状态流转（运行/完成/失败/中断）
-	EvToolCall      = "tool_call"      // 工具调用开始（含参数摘要）
-	EvLLMUsage      = "llm_usage"      // LLM 调用用量与成本
-	EvModelFallback = "model_fallback" // 模型故障切换
-	EvAgentMessage  = "agent_message"  // Agent 私聊消息
-	EvAgentSmith    = "agent_smith"    // agent-smith 优化事件
+	EvTaskState         = "task_state"         // 任务状态流转（运行/完成/失败/中断）
+	EvToolCall          = "tool_call"          // 工具调用开始（含参数摘要）
+	EvLLMUsage          = "llm_usage"          // LLM 调用用量与成本
+	EvModelFallback     = "model_fallback"     // 模型故障切换
+	EvAgentMessage      = "agent_message"      // Agent 私聊消息
+	EvAgentSmith        = "agent_smith"        // agent-smith 优化事件
+	EvContextCompressed = "context_compressed" // 上下文压缩事件
 )
 
 // TaskStateData 任务状态载荷。
@@ -118,6 +119,15 @@ type AgentSmithData struct {
 	Name   string `json:"name,omitempty"`
 	Reason string `json:"reason,omitempty"`
 	Error  string `json:"error,omitempty"`
+}
+
+// ContextCompressedData 上下文压缩事件载荷。
+type ContextCompressedData struct {
+	AgentID      string `json:"agentId"`
+	BeforeTokens int    `json:"beforeTokens"`
+	AfterTokens  int    `json:"afterTokens"`
+	Strategy     string `json:"strategy"` // summary | truncate
+	Summarized   int    `json:"summarized,omitempty"`
 }
 
 // ApprovalRequestData 审批请求载荷。

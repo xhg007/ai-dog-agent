@@ -5,10 +5,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { ConfigService, MCPService, TaskService } from '../../bindings/ai-dog-agent/internal/service/index.js'
+import { ConfigService, TaskService } from '../../bindings/ai-dog-agent/internal/service/index.js'
 import { ChatService } from '../../bindings/ai-dog-agent/internal/agent/index.js'
+import SkillEditor from './SkillEditor'
+import MCPEditor from './MCPEditor'
 import {
   applyGlass, loadGlass, saveGlass,
   DEFAULT_GLASS_ALPHA, DEFAULT_GLASS_BLUR,
@@ -48,14 +50,6 @@ interface MCPServerConfig {
   autoApproveReadOnly: boolean
 }
 
-// usesStdio 决定表单展示哪组连接字段：auto 时有 command 优先，其次看 url。
-function usesStdio(m: MCPServerConfig): boolean {
-  if (m.transport === 'stdio') return true
-  if (m.transport === 'http' || m.transport === 'sse') return false
-  if ((m.command ?? '').trim()) return true
-  return !(m.url ?? '').trim()
-}
-
 interface AgentSpec {
   agent_id: string     // 唯一不变 ID（UUID 无连字符），保存时后端自动生成固化
   name: string
@@ -66,6 +60,15 @@ interface AgentSpec {
   skills: string
   mcp_servers: string
   max_turns: number
+  budget: {
+    max_steps?: number
+    max_tokens?: number
+    max_duration_seconds?: number
+    max_tool_calls?: number
+    max_cost?: number
+    max_retries?: number
+  }
+  context: { compress_threshold?: number; keep_recent?: number }
 }
 
 interface AppConfig {
@@ -77,7 +80,7 @@ interface AppConfig {
   agentSmithAuto?: boolean
 }
 
-type Tab = 'models' | 'skills' | 'mcp' | 'agents' | 'appearance' | 'security' | 'usage'
+type Tab = 'models' | 'skills' | 'mcp' | 'agents' | 'project' | 'appearance' | 'security' | 'usage'
 
 interface DailyUsageRow { date: string; calls: number; inputTokens: number; outputTokens: number; costTotal: number }
 
@@ -94,6 +97,8 @@ function fromAgentSpec(s: any): AgentSpec {
     skills: (s.skills ?? []).join(', '),
     mcp_servers: (s.mcp_servers ?? []).join(', '),
     max_turns: s.max_turns ?? 0,
+    budget: s.budget ?? {},
+    context: s.context ?? {},
   }
 }
 
@@ -109,6 +114,8 @@ function toAgentSpec(a: AgentSpec) {
     skills: list(a.skills),
     mcp_servers: list(a.mcp_servers),
     max_turns: Number(a.max_turns) || 0,
+    budget: a.budget ?? {},
+    context: a.context ?? {},
   }
 }
 
@@ -126,10 +133,12 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
   const [error, setError] = useState('')
   const [smithBusy, setSmithBusy] = useState(false)
   const [smithMsg, setSmithMsg] = useState('')
+  const [projectCfg, setProjectCfg] = useState<any>({ main: {}, mcpServers: [], skills: [] })
+  const [projectStatus, setProjectStatus] = useState<any>(null)
+  const [projectBusy, setProjectBusy] = useState(false)
+  const [projectMsg, setProjectMsg] = useState('')
   const [glassAlpha, setGlassAlpha] = useState(() => loadGlass().alpha)
   const [glassBlur, setGlassBlur] = useState(() => loadGlass().blur)
-  // MCP 连接诊断结果（按 server ID）
-  const [mcpTest, setMcpTest] = useState<Record<string, { loading?: boolean; tools?: string[]; error?: string }>>({})
 
   // 外观设置即时生效并持久化（不参与配置文件的保存流程）
   useEffect(() => {
@@ -144,6 +153,29 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
     ConfigService.GetProjectAgents()
       .then((list: any[] | null) => setAgents((list ?? []).map(fromAgentSpec)))
       .catch(() => setAgents([]))
+  }
+
+  // 项目设置：配置快照 + 信任/审计状态
+  const loadProject = () => {
+    ConfigService.GetProjectConfig()
+      .then((p: any) => setProjectCfg({
+        main: p?.main ?? {},
+        skills: p?.skills ?? [],
+        mcpServers: (p?.mcpServers ?? []).map((m: any) => ({
+          ...m,
+          transport: m.transport ?? 'auto',
+          command: m.command ?? '',
+          url: m.url ?? '',
+          headers: m.headers ?? '',
+          args: (m.args ?? []).join(', '),
+          env: m.env ?? '',
+          autoApproveReadOnly: m.autoApproveReadOnly ?? false,
+        })),
+      }))
+      .catch(() => setProjectCfg({ main: {}, mcpServers: [], skills: [] }))
+    ConfigService.GetProjectStatus()
+      .then((s: any) => setProjectStatus(s ?? null))
+      .catch(() => setProjectStatus(null))
   }
 
   useEffect(() => {
@@ -167,6 +199,7 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
     ConfigService.GetConfigDir().then(setDir)
     ConfigService.GetProjectAgentDir().then(setAgentDir)
     loadAgents()
+    loadProject()
   }, [])
 
   const patch = (p: Partial<AppConfig>) => {
@@ -184,12 +217,6 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
       priceIn: 0, priceOut: 0,
     }],
   })
-
-  const updateSkill = (i: number, p: Partial<SkillConfig>) =>
-    patch({ skills: cfg.skills.map((s, j) => j === i ? { ...s, ...p } : s) })
-
-  const updateMCP = (i: number, p: Partial<MCPServerConfig>) =>
-    patch({ mcpServers: cfg.mcpServers.map((m, j) => j === i ? { ...m, ...p } : m) })
 
   const updateAgent = (i: number, p: Partial<AgentSpec>) => {
     setAgents(a => a.map((x, j) => j === i ? { ...x, ...p } : x))
@@ -245,11 +272,67 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
     }
   }
 
+  // 项目设置：保存项目级配置（主 Agent 覆盖 / 项目 MCP/Skill）
+  const saveProject = async () => {
+    setProjectBusy(true)
+    setProjectMsg('')
+    const cleanList = (v: any) => Array.isArray(v)
+      ? v.map((s: string) => s.trim()).filter(Boolean)
+      : []
+    const main = projectCfg.main ?? {}
+    const payload = {
+      ...projectCfg,
+      skills: projectCfg.skills ?? [],
+      mcpServers: (projectCfg.mcpServers ?? []).map((m: any) => ({
+        ...m,
+        args: (m.args ?? '').split(',').map((s: string) => s.trim()).filter(Boolean),
+      })),
+      main: {
+        ...main,
+        tools: cleanList(main.tools),
+        skills: cleanList(main.skills),
+        mcp_servers: cleanList(main.mcp_servers),
+      },
+    }
+    try {
+      await ConfigService.SaveProjectConfig(payload as any)
+      loadProject()
+      setProjectMsg('项目配置已保存；下次构建 Agent 时生效。')
+    } catch (e: any) {
+      setProjectMsg(typeof e === 'string' ? e : e?.message ?? String(e))
+    } finally {
+      setProjectBusy(false)
+    }
+  }
+
+  // 项目信任操作：trust / untrust / unblock
+  const updateTrust = async (action: 'trust' | 'untrust' | 'unblock') => {
+    setProjectBusy(true)
+    setProjectMsg('')
+    try {
+      if (action === 'trust') await ConfigService.TrustProject()
+      else if (action === 'untrust') await ConfigService.UntrustProject()
+      else await ConfigService.UnblockProject()
+      loadProject()
+      setProjectMsg(action === 'trust' ? '已信任项目配置'
+        : action === 'untrust' ? '已取消信任'
+        : '已解除拉黑，请再次确认信任')
+    } catch (e: any) {
+      setProjectMsg(typeof e === 'string' ? e : e?.message ?? String(e))
+    } finally {
+      setProjectBusy(false)
+    }
+  }
+
   const saveCurrent = async () => {
     if (tab === 'agents') {
       // Agent 配置与全局开关（agentSmithAuto）在不同文件，保存时一起提交
       await saveAgents()
       await saveConfig()
+      return
+    }
+    if (tab === 'project') {
+      await saveProject()
       return
     }
     await saveConfig()
@@ -314,33 +397,12 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
     }
   }
 
-  // MCP 连接诊断：一次性连接并列出工具名（无需先保存配置）
-  const testMCP = async (m: MCPServerConfig) => {
-    setMcpTest(s => ({ ...s, [m.id]: { loading: true } }))
-    try {
-      const names = await MCPService.TestConnection({
-        id: m.id,
-        name: m.name,
-        transport: m.transport || 'auto',
-        command: m.command,
-        args: m.args.split(',').map(s => s.trim()).filter(Boolean),
-        env: m.env,
-        url: m.url,
-        headers: m.headers,
-        enabled: m.enabled,
-        autoApproveReadOnly: m.autoApproveReadOnly,
-      } as any)
-      setMcpTest(s => ({ ...s, [m.id]: { tools: names ?? [] } }))
-    } catch (e: any) {
-      setMcpTest(s => ({ ...s, [m.id]: { error: typeof e === 'string' ? e : e?.message ?? String(e) } }))
-    }
-  }
-
   const tabs: { id: Tab; label: string }[] = [
     { id: 'models', label: '模型' },
     { id: 'skills', label: `Skills (${cfg.skills.length})` },
     { id: 'mcp', label: `MCP (${cfg.mcpServers.length})` },
     { id: 'agents', label: `项目 Agent (${agents.length})` },
+    { id: 'project', label: '项目设置' },
     { id: 'appearance', label: '外观' },
     { id: 'security', label: '安全' },
     { id: 'usage', label: '用量' },
@@ -439,43 +501,7 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
           <>
             <h3>Skills（可复用指令包）</h3>
             <p className="hint">启用的 Skill 会追加到主 Agent 的动态上下文尾部（不破坏提示词缓存前缀）；保存后对当前会话下一轮生效。</p>
-            {cfg.skills.length === 0 && <p className="hint">暂无 Skill，点击下方「添加 Skill」。</p>}
-            {cfg.skills.map((s, i) => (
-              <div key={s.id} className="model-row">
-                <div style={{ flex: 1 }}>
-                  <div className="form-grid">
-                    <Label>名称</Label>
-                    <Input value={s.name} onChange={e => updateSkill(i, { name: e.target.value })} />
-                    <Label>说明</Label>
-                    <Input value={s.description} placeholder="例如：Go 代码审查清单"
-                      onChange={e => updateSkill(i, { description: e.target.value })} />
-                    <Label>指令内容</Label>
-                    <Textarea rows={3} value={s.prompt}
-                      placeholder="追加给 Agent 的具体指令"
-                      onChange={e => updateSkill(i, { prompt: e.target.value })} />
-                    <Label>启用</Label>
-                    <Switch checked={s.enabled} onCheckedChange={v => updateSkill(i, { enabled: v })} />
-                  </div>
-                  <div className="row-actions">
-                    <Button
-                      variant="destructive"
-                      size="icon-sm"
-                      title="删除 Skill"
-                      aria-label={`删除 Skill ${s.name || s.id}`}
-                      onClick={() => patch({ skills: cfg.skills.filter(x => x.id !== s.id) })}
-                    ><Trash2 /></Button>
-                  </div>
-                </div>
-                <div className="meta">{s.enabled ? '已启用' : '未启用'}</div>
-              </div>
-            ))}
-            <div className="row-actions">
-              <Button variant="secondary" size="sm" onClick={() => patch({
-                skills: [...cfg.skills, {
-                  id: crypto.randomUUID(), name: '新 Skill', description: '', prompt: '', enabled: true,
-                }],
-              })}><Plus className="size-3.5" /> 添加 Skill</Button>
-            </div>
+            <SkillEditor skills={cfg.skills} onChange={skills => patch({ skills })} />
           </>
         )}
 
@@ -487,89 +513,7 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
               默认每次调用需审批（可「批准并记住」）。「只读工具免审批」仅对服务器声明 readOnlyHint=true 的工具跳过审批，默认关闭——
               该注解来自服务器，不可完全信任。
             </p>
-            {cfg.mcpServers.length === 0 && <p className="hint">暂无 MCP Server，点击下方「添加 MCP Server」。</p>}
-            {cfg.mcpServers.map((m, i) => (
-              <div key={m.id} className="model-row">
-                <div style={{ flex: 1 }}>
-                  <div className="form-grid">
-                    <Label>名称</Label>
-                    <Input value={m.name} onChange={e => updateMCP(i, { name: e.target.value })} />
-                    <Label>连接方式</Label>
-                    <Select value={m.transport || 'auto'} onValueChange={v => updateMCP(i, { transport: v })}>
-                      <SelectTrigger size="sm" className="w-full"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="auto">自动（有命令走 stdio，否则 HTTP）</SelectItem>
-                        <SelectItem value="stdio">stdio（本地进程）</SelectItem>
-                        <SelectItem value="http">HTTP（Streamable）</SelectItem>
-                        <SelectItem value="sse">SSE（旧版）</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    {usesStdio(m) ? (
-                      <>
-                        <Label>启动命令</Label>
-                        <Input value={m.command} placeholder="npx / uvx / 可执行文件路径"
-                          onChange={e => updateMCP(i, { command: e.target.value })} />
-                        <Label>参数</Label>
-                        <Input value={m.args} placeholder="-y, @modelcontextprotocol/server-filesystem"
-                          onChange={e => updateMCP(i, { args: e.target.value })} />
-                        <Label>环境变量</Label>
-                        <Textarea rows={2} value={m.env}
-                          placeholder={'ROOT=C:\\project\nDEBUG=0'}
-                          onChange={e => updateMCP(i, { env: e.target.value })} />
-                      </>
-                    ) : (
-                      <>
-                        <Label>服务地址</Label>
-                        <Input value={m.url} placeholder="https://example.com/mcp"
-                          onChange={e => updateMCP(i, { url: e.target.value })} />
-                        <Label>请求头</Label>
-                        <Textarea rows={2} value={m.headers}
-                          placeholder={'Authorization=Bearer ${MCP_TOKEN}'}
-                          onChange={e => updateMCP(i, { headers: e.target.value })} />
-                      </>
-                    )}
-                    <Label>启用</Label>
-                    <Switch checked={m.enabled} onCheckedChange={v => updateMCP(i, { enabled: v })} />
-                    <Label>只读工具免审批</Label>
-                    <Switch checked={m.autoApproveReadOnly}
-                      onCheckedChange={v => updateMCP(i, { autoApproveReadOnly: v })} />
-                  </div>
-                  <div className="row-actions">
-                    <Button
-                      variant="outline"
-                      size="xs"
-                      disabled={mcpTest[m.id]?.loading}
-                      onClick={() => testMCP(m)}
-                      title="启动一次连接并列出工具（不影响已建立的会话连接）"
-                    >{mcpTest[m.id]?.loading ? '连接中…' : '测试连接'}</Button>
-                    <Button
-                      variant="destructive"
-                      size="icon-sm"
-                      title="删除 MCP Server"
-                      aria-label={`删除 MCP Server ${m.name || m.id}`}
-                      onClick={() => patch({ mcpServers: cfg.mcpServers.filter(x => x.id !== m.id) })}
-                    ><Trash2 /></Button>
-                  </div>
-                  {mcpTest[m.id] && (
-                    <p className={mcpTest[m.id].error ? 'hint text-destructive' : 'hint'}>
-                      {mcpTest[m.id].loading ? '连接中…'
-                        : mcpTest[m.id].error ? `连接失败：${mcpTest[m.id].error}`
-                          : `已连接，工具：${(mcpTest[m.id].tools ?? []).join(', ') || '（无）'}`}
-                    </p>
-                  )}
-                </div>
-                <div className="meta">{m.enabled ? '已启用' : '未启用'}</div>
-              </div>
-            ))}
-            <div className="row-actions">
-              <Button variant="secondary" size="sm" onClick={() => patch({
-                mcpServers: [...cfg.mcpServers, {
-                  id: crypto.randomUUID(), name: '新 MCP Server', transport: 'auto',
-                  command: '', args: '', env: '', url: '', headers: '',
-                  enabled: true, autoApproveReadOnly: false,
-                }],
-              })}><Plus className="size-3.5" /> 添加 MCP Server</Button>
-            </div>
+            <MCPEditor servers={cfg.mcpServers} onChange={mcpServers => patch({ mcpServers })} />
           </>
         )}
 
@@ -621,6 +565,31 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
                     <Label>最大轮数</Label>
                     <Input type="number" value={a.max_turns}
                       onChange={e => updateAgent(i, { max_turns: Number(e.target.value) })} />
+                    <Label>预算：最大步骤</Label>
+                    <Input type="number" value={a.budget?.max_steps ?? 0}
+                      onChange={e => updateAgent(i, { budget: { ...(a.budget ?? {}), max_steps: Number(e.target.value) } })} />
+                    <Label>最大 Token</Label>
+                    <Input type="number" value={a.budget?.max_tokens ?? 0}
+                      onChange={e => updateAgent(i, { budget: { ...(a.budget ?? {}), max_tokens: Number(e.target.value) } })} />
+                    <Label>最大时长(秒)</Label>
+                    <Input type="number" value={a.budget?.max_duration_seconds ?? 0}
+                      onChange={e => updateAgent(i, { budget: { ...(a.budget ?? {}), max_duration_seconds: Number(e.target.value) } })} />
+                    <Label>最大工具调用</Label>
+                    <Input type="number" value={a.budget?.max_tool_calls ?? 0}
+                      onChange={e => updateAgent(i, { budget: { ...(a.budget ?? {}), max_tool_calls: Number(e.target.value) } })} />
+                    <Label>最大成本(元)</Label>
+                    <Input type="number" step="0.1" value={a.budget?.max_cost ?? 0}
+                      onChange={e => updateAgent(i, { budget: { ...(a.budget ?? {}), max_cost: Number(e.target.value) } })} />
+                    <Label>最大重试</Label>
+                    <Input type="number" value={a.budget?.max_retries ?? 0}
+                      onChange={e => updateAgent(i, { budget: { ...(a.budget ?? {}), max_retries: Number(e.target.value) } })} />
+                    <Label>压缩阈值（0-1）</Label>
+                    <Input type="number" step="0.05" min="0" max="1"
+                      value={a.context?.compress_threshold ?? 0}
+                      onChange={e => updateAgent(i, { context: { ...(a.context ?? {}), compress_threshold: Number(e.target.value) } })} />
+                    <Label>保留最近轮数</Label>
+                    <Input type="number" value={a.context?.keep_recent ?? 0}
+                      onChange={e => updateAgent(i, { context: { ...(a.context ?? {}), keep_recent: Number(e.target.value) } })} />
                   </div>
                   <div className="row-actions">
                     <Button
@@ -650,6 +619,7 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
               <Button variant="secondary" size="sm" disabled={!agentDir} onClick={() => setAgents(a => [...a, {
                 agent_id: '', name: '', description: '', system_prompt: '', model: '',
                 tools: '', skills: '', mcp_servers: '', max_turns: 0,
+                budget: {}, context: {},
               }])}><Plus className="size-3.5" /> 添加 Agent</Button>
               <Button
                 variant="secondary"
@@ -660,6 +630,158 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
               ><Wand2 className="size-3.5" /> {smithBusy ? '优化中…' : '优化 Agent'}</Button>
               {smithMsg && <span className="hint">{smithMsg}</span>}
             </div>
+          </>
+        )}
+
+        {tab === 'project' && (
+          <>
+            <h3>项目设置</h3>
+            <p className="hint">
+              项目级配置来自 {agentDir || '.aidog'}；加载前需确认信任，高危配置会被自动拉黑。
+              保存后下次构建 Agent 时生效。
+            </p>
+            {projectStatus ? (
+              <div className="model-row">
+                <div style={{ flex: 1 }}>
+                  <div className="form-grid">
+                    <Label>信任状态</Label>
+                    <div>
+                      <Badge variant="outline">{projectStatus.status}</Badge>
+                      {projectStatus.audit?.blocked && (
+                        <span className="hint text-destructive"> 存在高危配置</span>
+                      )}
+                    </div>
+                    <Label>审计统计</Label>
+                    <div className="hint">
+                      高危 {projectStatus.audit?.highCount ?? 0} · 中危 {projectStatus.audit?.mediumCount ?? 0} · 低危 {projectStatus.audit?.lowCount ?? 0}
+                    </div>
+                  </div>
+                  <div className="row-actions">
+                    {projectStatus.status === 'untrusted' && (
+                      <Button variant="secondary" size="sm" disabled={projectBusy}
+                        onClick={() => updateTrust('trust')}>信任项目配置</Button>
+                    )}
+                    {projectStatus.status === 'trusted' && (
+                      <Button variant="outline" size="sm" disabled={projectBusy}
+                        onClick={() => updateTrust('untrust')}>取消信任</Button>
+                    )}
+                    {projectStatus.status === 'blocked' && (
+                      <Button variant="destructive" size="sm" disabled={projectBusy}
+                        onClick={() => updateTrust('unblock')}>解除拉黑（需再次确认信任）</Button>
+                    )}
+                  </div>
+                </div>
+                <div className="meta">{projectStatus.root}</div>
+              </div>
+            ) : (
+              <p className="hint">设置工作区后可查看项目配置状态。</p>
+            )}
+            {projectStatus?.audit?.findings?.length > 0 && (
+              <div className="model-row">
+                <div style={{ flex: 1 }}>
+                  <h4>审计发现</h4>
+                  <ul className="hint">
+                    {projectStatus.audit.findings.map((f: any, i: number) => (
+                      <li key={i}>[{f.severity}] {f.rule} · {f.file} · {f.evidence}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+            <h4>项目 Agent（work agent）</h4>
+            {agents.length === 0 ? (
+              <p className="hint">暂无项目 Agent，可在「项目 Agent」tab 添加。</p>
+            ) : (
+              <div className="model-row">
+                <div style={{ flex: 1 }}>
+                  <ul className="hint">
+                    {agents.map(a => (
+                      <li key={a.agent_id || a.name}>
+                        {a.name || '未命名'} · 模型 {a.model || '跟随主模型'} · 工具 {a.tools || '只读'} · 预算 {a.budget?.max_steps || '默认'} 步
+                      </li>
+                    ))}
+                  </ul>
+                  <Button variant="outline" size="sm" onClick={() => setTab('agents')}>
+                    编辑完整字段
+                  </Button>
+                </div>
+              </div>
+            )}
+            <h4>项目专属 Skills</h4>
+            <SkillEditor
+              skills={projectCfg.skills ?? []}
+              onChange={skills => setProjectCfg((c: any) => ({ ...c, skills }))}
+            />
+            <h4>项目专属 MCP Server</h4>
+            <MCPEditor
+              servers={projectCfg.mcpServers ?? []}
+              onChange={mcpServers => setProjectCfg((c: any) => ({ ...c, mcpServers }))}
+            />
+            <h4>主 Agent 覆盖（.aidog/main.json）</h4>
+            {(() => {
+              const main = projectCfg.main ?? {}
+              const listText = (v: any) => Array.isArray(v) ? v.join(', ') : ''
+              const parseList = (v: string) => v.split(',').map(s => s.trim())
+              const patchMain = (p: any) => setProjectCfg((c: any) => ({
+                ...c, main: { ...(c.main ?? {}), ...p },
+              }))
+              return (
+                <>
+                  <div className="form-grid">
+                    <Label>模型覆盖</Label>
+                    <Input value={main.model ?? ''} placeholder="留空跟随全局激活模型"
+                      onChange={e => patchMain({ model: e.target.value })} />
+                    <Label>工具</Label>
+                    <Input value={listText(main.tools)} placeholder="read_file, dispatch_coder"
+                      onChange={e => patchMain({ tools: parseList(e.target.value) })} />
+                    <Label>Skills</Label>
+                    <Input value={listText(main.skills)} placeholder="全局或项目 Skill 名称"
+                      onChange={e => patchMain({ skills: parseList(e.target.value) })} />
+                    <Label>MCP Servers</Label>
+                    <Input value={listText(main.mcp_servers)} placeholder="全局或项目 MCP 名称"
+                      onChange={e => patchMain({ mcp_servers: parseList(e.target.value) })} />
+                  </div>
+                  <h4>执行预算（0 = 默认值）</h4>
+                  <div className="form-grid">
+                    <Label>最大步骤</Label>
+                    <Input type="number" value={main.budget?.max_steps ?? 0}
+                      onChange={e => patchMain({ budget: { ...(main.budget ?? {}), max_steps: Number(e.target.value) } })} />
+                    <Label>最大 Token</Label>
+                    <Input type="number" value={main.budget?.max_tokens ?? 0}
+                      onChange={e => patchMain({ budget: { ...(main.budget ?? {}), max_tokens: Number(e.target.value) } })} />
+                    <Label>最大时长(秒)</Label>
+                    <Input type="number" value={main.budget?.max_duration_seconds ?? 0}
+                      onChange={e => patchMain({ budget: { ...(main.budget ?? {}), max_duration_seconds: Number(e.target.value) } })} />
+                    <Label>最大工具调用</Label>
+                    <Input type="number" value={main.budget?.max_tool_calls ?? 0}
+                      onChange={e => patchMain({ budget: { ...(main.budget ?? {}), max_tool_calls: Number(e.target.value) } })} />
+                    <Label>最大成本(元)</Label>
+                    <Input type="number" step="0.1" value={main.budget?.max_cost ?? 0}
+                      onChange={e => patchMain({ budget: { ...(main.budget ?? {}), max_cost: Number(e.target.value) } })} />
+                    <Label>最大重试</Label>
+                    <Input type="number" value={main.budget?.max_retries ?? 0}
+                      onChange={e => patchMain({ budget: { ...(main.budget ?? {}), max_retries: Number(e.target.value) } })} />
+                  </div>
+                  <h4>上下文压缩（阈值 0-1，0 = 默认 0.7）</h4>
+                  <div className="form-grid">
+                    <Label>触发阈值</Label>
+                    <Input type="number" step="0.05" min="0" max="1"
+                      value={main.context?.compress_threshold ?? 0}
+                      onChange={e => patchMain({ context: { ...(main.context ?? {}), compress_threshold: Number(e.target.value) } })} />
+                    <Label>保留最近轮数</Label>
+                    <Input type="number" value={main.context?.keep_recent ?? 0}
+                      onChange={e => patchMain({ context: { ...(main.context ?? {}), keep_recent: Number(e.target.value) } })} />
+                  </div>
+                </>
+              )
+            })()}
+            <div className="row-actions">
+              <Button variant="secondary" size="sm" disabled={projectBusy} onClick={saveProject}>
+                保存项目配置
+              </Button>
+              {projectMsg && <span className="hint">{projectMsg}</span>}
+            </div>
+            <p className="hint">主 Agent 覆盖与项目专属 MCP/Skill 编辑在本页后续接入。</p>
           </>
         )}
 

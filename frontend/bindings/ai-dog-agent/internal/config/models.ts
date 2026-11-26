@@ -10,6 +10,90 @@ import { Create as $Create } from "@wailsio/runtime";
 import * as agentspec$0 from "../agentspec/models.js";
 
 /**
+ * AuditFinding 一条审计发现。
+ */
+export class AuditFinding {
+    "severity": Severity;
+    "rule": string;
+    "file": string;
+    "evidence": string;
+
+    /** Creates a new AuditFinding instance. */
+    constructor($$source: Partial<AuditFinding> = {}) {
+        if (!("severity" in $$source)) {
+            this["severity"] = Severity.$zero;
+        }
+        if (!("rule" in $$source)) {
+            this["rule"] = "";
+        }
+        if (!("file" in $$source)) {
+            this["file"] = "";
+        }
+        if (!("evidence" in $$source)) {
+            this["evidence"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AuditFinding instance from a string or object.
+     */
+    static createFrom($$source: any = {}): AuditFinding {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new AuditFinding($$parsedSource as Partial<AuditFinding>);
+    }
+}
+
+/**
+ * AuditReport 审计结果汇总。
+ */
+export class AuditReport {
+    "findings": AuditFinding[];
+    "highCount": number;
+    "mediumCount": number;
+    "lowCount": number;
+
+    /**
+     * 存在高危即应自动拉黑
+     */
+    "blocked": boolean;
+
+    /** Creates a new AuditReport instance. */
+    constructor($$source: Partial<AuditReport> = {}) {
+        if (!("findings" in $$source)) {
+            this["findings"] = [];
+        }
+        if (!("highCount" in $$source)) {
+            this["highCount"] = 0;
+        }
+        if (!("mediumCount" in $$source)) {
+            this["mediumCount"] = 0;
+        }
+        if (!("lowCount" in $$source)) {
+            this["lowCount"] = 0;
+        }
+        if (!("blocked" in $$source)) {
+            this["blocked"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AuditReport instance from a string or object.
+     */
+    static createFrom($$source: any = {}): AuditReport {
+        const $$createField0_0 = $$createType1;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("findings" in $$parsedSource) {
+            $$parsedSource["findings"] = $$createField0_0($$parsedSource["findings"]);
+        }
+        return new AuditReport($$parsedSource as Partial<AuditReport>);
+    }
+}
+
+/**
  * Config 应用配置根对象。
  */
 export class Config {
@@ -33,6 +117,16 @@ export class Config {
      */
     "agentSmithAuto"?: boolean;
 
+    /**
+     * TrustedProjects 已确认信任的项目根（绝对路径，已规范化）。
+     */
+    "trustedProjects"?: string[];
+
+    /**
+     * BlockedProjects 审计高危自动拉黑的项目根（绝对路径）。
+     */
+    "blockedProjects"?: string[];
+
     /** Creates a new Config instance. */
     constructor($$source: Partial<Config> = {}) {
         if (!("models" in $$source)) {
@@ -55,10 +149,12 @@ export class Config {
      * Creates a new Config instance from a string or object.
      */
     static createFrom($$source: any = {}): Config {
-        const $$createField0_0 = $$createType1;
-        const $$createField3_0 = $$createType3;
-        const $$createField4_0 = $$createType5;
-        const $$createField5_0 = $$createType6;
+        const $$createField0_0 = $$createType3;
+        const $$createField3_0 = $$createType5;
+        const $$createField4_0 = $$createType7;
+        const $$createField5_0 = $$createType8;
+        const $$createField7_0 = $$createType8;
+        const $$createField8_0 = $$createType8;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("models" in $$parsedSource) {
             $$parsedSource["models"] = $$createField0_0($$parsedSource["models"]);
@@ -71,6 +167,12 @@ export class Config {
         }
         if ("shellWhitelist" in $$parsedSource) {
             $$parsedSource["shellWhitelist"] = $$createField5_0($$parsedSource["shellWhitelist"]);
+        }
+        if ("trustedProjects" in $$parsedSource) {
+            $$parsedSource["trustedProjects"] = $$createField7_0($$parsedSource["trustedProjects"]);
+        }
+        if ("blockedProjects" in $$parsedSource) {
+            $$parsedSource["blockedProjects"] = $$createField8_0($$parsedSource["blockedProjects"]);
         }
         return new Config($$parsedSource as Partial<Config>);
     }
@@ -127,7 +229,7 @@ export class MCPServerConfig {
      * Creates a new MCPServerConfig instance from a string or object.
      */
     static createFrom($$source: any = {}): MCPServerConfig {
-        const $$createField4_0 = $$createType6;
+        const $$createField4_0 = $$createType8;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("args" in $$parsedSource) {
             $$parsedSource["args"] = $$createField4_0($$parsedSource["args"]);
@@ -242,9 +344,9 @@ export class ProjectConfig {
      * Creates a new ProjectConfig instance from a string or object.
      */
     static createFrom($$source: any = {}): ProjectConfig {
-        const $$createField0_0 = $$createType7;
-        const $$createField1_0 = $$createType5;
-        const $$createField2_0 = $$createType3;
+        const $$createField0_0 = $$createType9;
+        const $$createField1_0 = $$createType7;
+        const $$createField2_0 = $$createType5;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("main" in $$parsedSource) {
             $$parsedSource["main"] = $$createField0_0($$parsedSource["main"]);
@@ -295,11 +397,11 @@ export class ProjectMain {
      * Creates a new ProjectMain instance from a string or object.
      */
     static createFrom($$source: any = {}): ProjectMain {
-        const $$createField1_0 = $$createType6;
-        const $$createField2_0 = $$createType6;
-        const $$createField3_0 = $$createType6;
-        const $$createField4_0 = $$createType8;
-        const $$createField5_0 = $$createType9;
+        const $$createField1_0 = $$createType8;
+        const $$createField2_0 = $$createType8;
+        const $$createField3_0 = $$createType8;
+        const $$createField4_0 = $$createType10;
+        const $$createField5_0 = $$createType11;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tools" in $$parsedSource) {
             $$parsedSource["tools"] = $$createField1_0($$parsedSource["tools"]);
@@ -319,6 +421,70 @@ export class ProjectMain {
         return new ProjectMain($$parsedSource as Partial<ProjectMain>);
     }
 }
+
+/**
+ * ProjectStatus 项目配置状态与审计报告。
+ */
+export class ProjectStatus {
+    "root": string;
+    "status": ProjectTrustStatus;
+    "audit": AuditReport;
+
+    /** Creates a new ProjectStatus instance. */
+    constructor($$source: Partial<ProjectStatus> = {}) {
+        if (!("root" in $$source)) {
+            this["root"] = "";
+        }
+        if (!("status" in $$source)) {
+            this["status"] = ProjectTrustStatus.$zero;
+        }
+        if (!("audit" in $$source)) {
+            this["audit"] = (new AuditReport());
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProjectStatus instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProjectStatus {
+        const $$createField2_0 = $$createType12;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("audit" in $$parsedSource) {
+            $$parsedSource["audit"] = $$createField2_0($$parsedSource["audit"]);
+        }
+        return new ProjectStatus($$parsedSource as Partial<ProjectStatus>);
+    }
+}
+
+/**
+ * ProjectTrustStatus 项目配置信任状态。
+ */
+export enum ProjectTrustStatus {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    ProjectTrusted = "trusted",
+    ProjectUntrusted = "untrusted",
+    ProjectBlocked = "blocked",
+};
+
+/**
+ * Severity 审计严重级别。
+ */
+export enum Severity {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    SeverityLow = "low",
+    SeverityMedium = "medium",
+    SeverityHigh = "high",
+};
 
 /**
  * SkillConfig 可复用的技能指令包（启用后追加到主 Agent 动态上下文）。
@@ -361,13 +527,16 @@ export class SkillConfig {
 }
 
 // Private type creation functions
-const $$createType0 = ModelConfig.createFrom;
+const $$createType0 = AuditFinding.createFrom;
 const $$createType1 = $Create.Array($$createType0);
-const $$createType2 = SkillConfig.createFrom;
+const $$createType2 = ModelConfig.createFrom;
 const $$createType3 = $Create.Array($$createType2);
-const $$createType4 = MCPServerConfig.createFrom;
+const $$createType4 = SkillConfig.createFrom;
 const $$createType5 = $Create.Array($$createType4);
-const $$createType6 = $Create.Array($Create.Any);
-const $$createType7 = ProjectMain.createFrom;
-const $$createType8 = agentspec$0.Budget.createFrom;
-const $$createType9 = agentspec$0.ContextConfig.createFrom;
+const $$createType6 = MCPServerConfig.createFrom;
+const $$createType7 = $Create.Array($$createType6);
+const $$createType8 = $Create.Array($Create.Any);
+const $$createType9 = ProjectMain.createFrom;
+const $$createType10 = agentspec$0.Budget.createFrom;
+const $$createType11 = agentspec$0.ContextConfig.createFrom;
+const $$createType12 = AuditReport.createFrom;

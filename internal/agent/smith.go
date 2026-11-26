@@ -401,6 +401,13 @@ func (s *Smith) Run(ctx context.Context, tr SmithTrigger) (*SmithProposal, error
 		return nil, workspace.ErrNoWorkspace
 	}
 	root := s.ws.Root()
+	st, err := s.cfg.ProjectStatus(root)
+	if err != nil {
+		return nil, err
+	}
+	if st.Status != config.ProjectTrusted {
+		return nil, fmt.Errorf("项目配置未信任或已拉黑，无法运行 agent-smith")
+	}
 	if !s.acquire(root) {
 		return nil, ErrSmithBusy
 	}

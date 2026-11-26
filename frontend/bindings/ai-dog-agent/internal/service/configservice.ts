@@ -85,11 +85,20 @@ export function GetProjectSkills(): $CancellablePromise<config$0.SkillConfig[]> 
 }
 
 /**
+ * GetProjectStatus 返回项目配置信任状态与审计报告。
+ */
+export function GetProjectStatus(): $CancellablePromise<config$0.ProjectStatus> {
+    return $Call.ByID(3172527668).then(($result: any) => {
+        return $$createType8($result);
+    });
+}
+
+/**
  * ListAgentBackups 返回指定项目 Agent 的配置备份（最新在前）。
  */
 export function ListAgentBackups(name: string): $CancellablePromise<agentspec$0.BackupInfo[]> {
     return $Call.ByID(1041635467, name).then(($result: any) => {
-        return $$createType9($result);
+        return $$createType10($result);
     });
 }
 
@@ -143,6 +152,27 @@ export function SetActiveModel(id: string): $CancellablePromise<void> {
     return $Call.ByID(2299248964, id);
 }
 
+/**
+ * TrustProject 信任当前项目配置；已拉黑项目需先解除拉黑。
+ */
+export function TrustProject(): $CancellablePromise<void> {
+    return $Call.ByID(2869088744);
+}
+
+/**
+ * UnblockProject 解除当前项目拉黑（不会自动信任）。
+ */
+export function UnblockProject(): $CancellablePromise<void> {
+    return $Call.ByID(1722564834);
+}
+
+/**
+ * UntrustProject 取消当前项目信任。
+ */
+export function UntrustProject(): $CancellablePromise<void> {
+    return $Call.ByID(2223000787);
+}
+
 // Private type creation functions
 const $$createType0 = config$0.Config.createFrom;
 const $$createType1 = agentspec$0.Spec.createFrom;
@@ -152,5 +182,6 @@ const $$createType4 = config$0.MCPServerConfig.createFrom;
 const $$createType5 = $Create.Array($$createType4);
 const $$createType6 = config$0.SkillConfig.createFrom;
 const $$createType7 = $Create.Array($$createType6);
-const $$createType8 = agentspec$0.BackupInfo.createFrom;
-const $$createType9 = $Create.Array($$createType8);
+const $$createType8 = config$0.ProjectStatus.createFrom;
+const $$createType9 = agentspec$0.BackupInfo.createFrom;
+const $$createType10 = $Create.Array($$createType9);

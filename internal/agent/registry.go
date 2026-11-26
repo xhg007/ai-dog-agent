@@ -13,26 +13,33 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
 
 	"ai-dog-agent/internal/agentspec"
+	"ai-dog-agent/internal/config"
+	"ai-dog-agent/internal/eventbus"
 )
 
 // agentSession 一个 work agent 的私聊会话。
 type agentSession struct {
 	spec   agentspec.Spec
+	model  config.ModelConfig // 注册时的实际模型配置（压缩与事件用）
 	agent  adk.Agent
 	runner *adk.Runner
 
 	mu      sync.Mutex // 同一 (session, agent) 串行
 	history []*schema.Message
+
+	lastCompress time.Time // 上次压缩时间（冷却防抖）
 }
 
 // Registry 会话级 Agent 注册表。
 type Registry struct {
 	mu       sync.Mutex
+	bus      *eventbus.Bus
 	sessions map[string]map[string]*agentSession // sessionID -> agentID -> session
 }
 
@@ -41,11 +48,19 @@ func NewRegistry() *Registry {
 	return &Registry{sessions: make(map[string]map[string]*agentSession)}
 }
 
+// SetBus 注入事件总线（压缩事件推送用；测试可省略）。
+func (r *Registry) SetBus(bus *eventbus.Bus) {
+	r.mu.Lock()
+	r.bus = bus
+	r.mu.Unlock()
+}
+
 // Register 注册/覆盖一个 work agent 会话。覆盖时清空该 Agent 的私聊历史
 // （配置重建后旧历史对新的提示词/工具集不再有意义）。
 func (r *Registry) Register(sessionID string, wa *WorkAgent) *agentSession {
 	as := &agentSession{
 		spec:  wa.Spec,
+		model: wa.Model,
 		agent: wa.Agent,
 		runner: adk.NewRunner(context.Background(), adk.RunnerConfig{
 			Agent:           wa.Agent,

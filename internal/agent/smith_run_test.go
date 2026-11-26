@@ -45,6 +45,9 @@ func newRunSmith(t *testing.T, bus *eventbus.Bus, reply string) (*Smith, *httpte
 	}); err != nil {
 		t.Fatalf("Save config: %v", err)
 	}
+	if err := cfg.TrustProject(ws.Root()); err != nil {
+		t.Fatalf("TrustProject: %v", err)
+	}
 	return &Smith{
 		cfg: cfg, ws: ws, appr: approval.New(bus), bus: bus,
 		id: "smith-test", running: make(map[string]bool),

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/adk"
+	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
@@ -55,11 +56,13 @@ type chatSession struct {
 	runner        *adk.Runner
 	cancel        context.CancelFunc
 	running       bool
-	currentTaskID string             // 当前轮次的任务 ID（M5）
-	title         string             // 线程标题（取首条用户消息摘要）
-	modelName     string             // 构建 Agent 时使用的主模型显示名（chat_started 事件上报）
-	modelCfg      config.ModelConfig // 实际主模型配置（用量按真实模型归因）
-	limits        Limits             // 本轮执行上限（主 Agent 默认 + 项目覆盖）
+	currentTaskID string                  // 当前轮次的任务 ID（M5）
+	title         string                  // 线程标题（取首条用户消息摘要）
+	modelName     string                  // 构建 Agent 时使用的主模型显示名（chat_started 事件上报）
+	modelCfg      config.ModelConfig      // 实际主模型配置（用量按真实模型归因）
+	limits        Limits                  // 本轮执行上限（主 Agent 默认 + 项目覆盖）
+	contextCfg    agentspec.ContextConfig // 上下文压缩配置（项目 main.json 覆盖）
+	lastCompress  time.Time               // 上次上下文压缩时间（冷却防抖）
 	createdAt     time.Time
 	lastActive    time.Time
 	messages      []StoredMessage // 持久化消息历史
@@ -80,6 +83,8 @@ type SessionInfo struct {
 func NewChatService(cfg *config.Manager, ws *workspace.Manager, bus *eventbus.Bus,
 	appr *approval.Manager, backupRoot, sessionDir string, tasks *task.Manager,
 	mcpMgr *mcp.Manager) *ChatService {
+	reg := NewRegistry()
+	reg.SetBus(bus)
 	s := &ChatService{
 		cfg:        cfg,
 		ws:         ws,
@@ -88,7 +93,7 @@ func NewChatService(cfg *config.Manager, ws *workspace.Manager, bus *eventbus.Bu
 		backupRoot: backupRoot,
 		tasks:      tasks,
 		mcpMgr:     mcpMgr,
-		registry:   NewRegistry(),
+		registry:   reg,
 		smith:      NewSmith(cfg, ws, appr, tasks, bus),
 		sessions:   make(map[string]*chatSession),
 	}
@@ -340,14 +345,16 @@ func (s *ChatService) initAgentLocked(sess *chatSession) error {
 	// 项目级预算覆盖主 Agent 默认上限；无项目配置时用主 Agent 默认值。
 	eff := s.cfg.Effective(s.ws.Root())
 	var budget agentspec.Budget
+	var contextCfg agentspec.ContextConfig
 	if eff.Project != nil {
 		budget = eff.Project.Main.Budget
+		contextCfg = eff.Project.Main.Context
 	}
 	limits := MainLimits(budget)
 	// 外部 MCP 工具 + 项目 Agent 分派工具：单个 MCP server 失败只跳过（不阻塞会话）
 	var extraTools []tool.BaseTool
 	if s.mcpMgr != nil {
-		extraTools = s.mcpMgr.Tools(ctx, s.cfg.Get().MCPServers, s.ws.Root(), sess.id)
+		extraTools = s.mcpMgr.Tools(ctx, eff.MCPServers, s.ws.Root(), sess.id)
 	}
 	extraTools = append(extraTools, dispatchTools...)
 	// 主 Agent 的私聊工具：向同会话的 work agent 发送消息并等待回复。
@@ -379,6 +386,7 @@ func (s *ChatService) initAgentLocked(sess *chatSession) error {
 	sess.modelName = modelName
 	sess.modelCfg = modelCfg
 	sess.limits = limits
+	sess.contextCfg = contextCfg
 	// 记录构建时的配置版本：Settings 保存后 configChanged 为 true，下一轮重建
 	sess.configVersion = s.cfg.Version()
 	slog.Info("会话 Agent 已构建", "session", sess.id, "agentId", sess.agentID,
@@ -389,7 +397,14 @@ func (s *ChatService) initAgentLocked(sess *chatSession) error {
 // buildPromptData 构建追加到稳定提示词尾部的动态数据：
 // 已启用的 Skills、MCP Server 以及项目自定义子 Agent 配置（文本由模板渲染）。
 func (s *ChatService) buildPromptData() PromptData {
-	cfg := s.cfg.Get()
+	if s.cfg == nil {
+		return PromptData{}
+	}
+	root := ""
+	if s.ws.IsSet() {
+		root = s.ws.Root()
+	}
+	cfg := s.cfg.Effective(root)
 	var data PromptData
 	for _, sk := range cfg.Skills {
 		if sk.Enabled {
@@ -401,8 +416,9 @@ func (s *ChatService) buildPromptData() PromptData {
 			data.MCPServers = append(data.MCPServers, m)
 		}
 	}
-	if s.ws.IsSet() {
-		if specs, err := agentspec.List(s.ws.Root()); err == nil {
+	// 仅信任项目加载 .aidog/agents（Effective 未信任时 Project 为 nil）
+	if cfg.Project != nil && root != "" {
+		if specs, err := agentspec.List(root); err == nil {
 			data.Agents = specs
 		}
 	}
@@ -518,6 +534,66 @@ func (s *ChatService) OptimizeAgents(sessionID string) error {
 	return nil
 }
 
+// compressSession 压缩主 Agent 会话历史并写回；失败时返回 nil（调用方继续用原 input）。
+func (s *ChatService) compressSession(ctx context.Context, sess *chatSession,
+	input []*schema.Message, mc config.ModelConfig, agentID string,
+	contextCfg agentspec.ContextConfig) ([]*schema.Message, *CompressionResult) {
+	if time.Since(sess.lastCompress) < compressCooldown {
+		return nil, nil
+	}
+	cm, err := llm.BuildModel(ctx, mc, agentID, agentID)
+	if err != nil {
+		slog.Warn("构建压缩模型失败，跳过上下文压缩", "session", sess.id, "err", err)
+		return nil, nil
+	}
+	compressed, res := CompressHistory(ctx, cm, input, CompressOptions{
+		ContextWindow: mc.EffectiveContextWindow(),
+		Threshold:     contextCfg.EffectiveThreshold(),
+		KeepRecent:    contextCfg.EffectiveKeepRecent(),
+	})
+	if !res.Compressed {
+		return nil, nil
+	}
+	stored := storedFromSchema(compressed)
+	s.mu.Lock()
+	sess.messages = stored
+	sess.lastActive = time.Now()
+	sess.lastCompress = time.Now()
+	s.persistReplaceLocked(sess)
+	s.mu.Unlock()
+	slog.Info("上下文已压缩", "session", sess.id, "before", res.BeforeTokens,
+		"after", res.AfterTokens, "strategy", res.Strategy, "summarized", res.Summarized)
+	if s.bus != nil {
+		s.bus.Emit(eventbus.Event{
+			Type: eventbus.EvContextCompressed, SessionID: sess.id,
+			Data: eventbus.ContextCompressedData{
+				AgentID: agentID, BeforeTokens: res.BeforeTokens, AfterTokens: res.AfterTokens,
+				Strategy: res.Strategy, Summarized: res.Summarized,
+			},
+		})
+	}
+	return compressed, &res
+}
+
+// storedFromSchema 把压缩后的模型输入转回持久化消息（只保留 user/assistant）。
+func storedFromSchema(msgs []*schema.Message) []StoredMessage {
+	out := make([]StoredMessage, 0, len(msgs))
+	for _, m := range msgs {
+		if m == nil {
+			continue
+		}
+		switch m.Role {
+		case schema.User:
+			out = append(out, StoredMessage{Role: "user", Content: m.Content})
+		case schema.Assistant:
+			if m.Content != "" {
+				out = append(out, StoredMessage{Role: "assistant", Content: m.Content})
+			}
+		}
+	}
+	return out
+}
+
 // runTurn 执行一轮对话：回放持久化历史，消费事件流并转发到前端，同时落盘消息。
 // 任务状态机：正常结束 → review → completed；用户中断 → cancelled；其余错误 → failed（FR-5.2）。
 func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
@@ -543,15 +619,55 @@ func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
 	}
 
 	s.mu.Lock()
-	input := historyMessages(sess.messages)
-	snapshot := marshalMessages(sess.messages)
+	stored := append([]StoredMessage(nil), sess.messages...)
 	agentID := sess.agentID
 	modelCfg := sess.modelCfg
 	limits := sess.limits
+	contextCfg := sess.contextCfg
 	s.mu.Unlock()
-	// 执行计数与超时上下文（步骤/工具/Token/成本上限 + 最大执行时间）
+
+	// 执行计数与超时上下文（压缩本身也计入预算）
 	exec, execCtx, execCancel := StartExecution(ctx, limits)
 	defer execCancel()
+
+	input := historyMessages(stored)
+	// 上下文压缩：超过模型窗口 × 阈值时，早期消息摘要 + 保留最近轮
+	if ShouldCompress(input, modelCfg.EffectiveContextWindow(), contextCfg.EffectiveThreshold()) {
+		if compressed, res := s.compressSession(execCtx, sess, input, modelCfg, agentID, contextCfg); compressed != nil {
+			input = compressed
+			s.mu.Lock()
+			stored = append([]StoredMessage(nil), sess.messages...)
+			s.mu.Unlock()
+			if res != nil && res.Usage != nil {
+				exec.AddLLM(&model.TokenUsage{
+					PromptTokens:     res.Usage.PromptTokens,
+					CompletionTokens: res.Usage.CompletionTokens,
+					TotalTokens:      res.Usage.TotalTokens,
+				}, modelCfg.PriceIn, modelCfg.PriceOut)
+				if s.tasks != nil && taskID != "" {
+					inTok, outTok := int64(res.Usage.PromptTokens), int64(res.Usage.CompletionTokens)
+					costIn := float64(inTok) / 1e6 * modelCfg.PriceIn
+					costOut := float64(outTok) / 1e6 * modelCfg.PriceOut
+					s.tasks.Emit(sessionID, taskID, eventbus.EvLLMUsage, eventbus.LLMUsageData{
+						TaskID: taskID, AgentID: agentID, Model: modelCfg.Name, ModelID: modelCfg.ID,
+						InputTokens: inTok, OutputTokens: outTok, CostIn: costIn, CostOut: costOut,
+					})
+					s.tasks.AppendTokenUsage(store.TokenUsage{
+						TaskID: taskID, Model: modelCfg.Name, ModelID: modelCfg.ID,
+						InputTokens: inTok, OutputTokens: outTok, CostIn: costIn, CostOut: costOut,
+						CreatedAt: time.Now(),
+					})
+				}
+			}
+		}
+	}
+	// 压缩开销也可能触发预算/步骤上限
+	if err := exec.StopError(); err != nil {
+		emitError(err.Error())
+		finishTask(store.StatusFailed, truncateTitle(err.Error()))
+		return
+	}
+	snapshot := marshalMessages(stored)
 	// 观测上下文：会话/任务标识 + 消息快照 + 实际模型（用量归因）+ 执行计数器
 	runCtx := withObsInfo(execCtx, &obsInfo{
 		SessionID: sessionID, TaskID: taskID, Snapshot: snapshot,

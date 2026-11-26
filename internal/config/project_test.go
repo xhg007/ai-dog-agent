@@ -130,6 +130,9 @@ func TestManagerEffective(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SaveProject: %v", err)
 	}
+	if err := m.TrustProject(root); err != nil {
+		t.Fatalf("TrustProject: %v", err)
+	}
 
 	eff := m.Effective(root)
 	if len(eff.Skills) != 2 || eff.Project == nil || eff.Project.Main.Model != "x" {

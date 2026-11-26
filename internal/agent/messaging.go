@@ -143,6 +143,23 @@ func (r *Registry) SendMessage(ctx context.Context, sessionID, from string,
 	target.mu.Lock()
 	defer target.mu.Unlock()
 
+	// 私聊历史超过窗口阈值时先压缩（保留最近轮，早期消息摘要）
+	if ShouldCompress(target.history, target.model.EffectiveContextWindow(), target.spec.Context.EffectiveThreshold()) {
+		if compressed, res := compressAgentHistory(ctx, target); compressed != nil {
+			target.history = compressed
+			if res != nil && r.bus != nil {
+				r.bus.Emit(eventbus.Event{
+					Type: eventbus.EvContextCompressed, SessionID: sessionID,
+					Data: eventbus.ContextCompressedData{
+						AgentID: target.spec.AgentID, BeforeTokens: res.BeforeTokens,
+						AfterTokens: res.AfterTokens, Strategy: res.Strategy,
+						Summarized: res.Summarized,
+					},
+				})
+			}
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, SendMessageTimeout)
 	defer cancel()
 

@@ -84,6 +84,38 @@ func (c *ConfigService) DeleteProjectAgent(name string) error {
 	return agentspec.Delete(c.ws.Root(), name)
 }
 
+// GetProjectStatus 返回项目配置信任状态与审计报告。
+func (c *ConfigService) GetProjectStatus() (config.ProjectStatus, error) {
+	if !c.ws.IsSet() {
+		return config.ProjectStatus{}, errors.New("未设置工作区")
+	}
+	return c.mgr.ProjectStatus(c.ws.Root())
+}
+
+// TrustProject 信任当前项目配置；已拉黑项目需先解除拉黑。
+func (c *ConfigService) TrustProject() error {
+	if !c.ws.IsSet() {
+		return errors.New("未设置工作区")
+	}
+	return c.mgr.TrustProject(c.ws.Root())
+}
+
+// UntrustProject 取消当前项目信任。
+func (c *ConfigService) UntrustProject() error {
+	if !c.ws.IsSet() {
+		return errors.New("未设置工作区")
+	}
+	return c.mgr.UntrustProject(c.ws.Root())
+}
+
+// UnblockProject 解除当前项目拉黑（不会自动信任）。
+func (c *ConfigService) UnblockProject() error {
+	if !c.ws.IsSet() {
+		return errors.New("未设置工作区")
+	}
+	return c.mgr.UnblockProject(c.ws.Root())
+}
+
 // GetProjectConfig 返回项目级配置（.aidog 目录；未设置工作区时返回空配置）。
 func (c *ConfigService) GetProjectConfig() (config.ProjectConfig, error) {
 	if !c.ws.IsSet() {

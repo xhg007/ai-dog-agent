@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-26-multi-agent-architecture-design.md` §3.1–3.6、§6 阶段 A。
 
-**Status:** 阶段 A/B/C/D 已完成（2026-11-26）；阶段 E 未开始。
+**Status:** 阶段 A–E 已完成（2026-11-26）。
 
 ## Global Constraints
 
@@ -131,20 +131,23 @@
 - [x] 前端：设置页优化/撤销/开关、任务面板优化按钮、ThreadPanel system 行。
 - [x] 测试：解析/校验/skip/审批拒绝/批准保存/备份/事件/锁/开关/去重/忙碌。
 
-### 阶段 E：上下文压缩 + 配置页
+### 阶段 E：上下文压缩 + 配置页（已完成 2026-11-26）
 
-- 按 `ModelConfig.ContextWindow × Spec.Context.CompressThreshold` 触发压缩。
-- 摘要失败降级规则截断；`context_compressed` 事件与持久化。
-- SettingsPanel 按全局/项目分组，项目专属 MCP/Skill、预算/压缩阈值编辑与 `.aidog` 信任确认。
+- [x] token 估算（rune/3）+ 阈值触发；保留最近轮，早期消息由 Agent 模型摘要，失败降级规则截断。
+- [x] 主 Agent 会话与 work agent 私聊历史压缩；摘要 usage 计入预算；30s 冷却；`context_compressed` 事件。
+- [x] 配置页新增「项目设置」tab：信任/审计、主 Agent 覆盖、项目专属 MCP/Skill、work agent 预算/压缩。
+- [x] `.aidog` 首次信任确认 + 持久化；审计规则自动拉黑高危；解除拉黑需二次确认。
+- [x] 测试：估算/阈值/摘要/降级/事件/冷却、审计规则、拉黑/信任/持久化。
 
 ## 已知限制与风险
 
 - **ErrMaxRetries**：已定义但 ADK 内部重试用尽后以普通错误上报，暂未形成独立触发点。
 - **超限边界**：ADK `MaxIterations` 与 Runtime 外层计数可能相差一次调用；两者同时存在，超限原因以 Runtime 计数为准。
-- **项目配置信任**：阶段 A 仅记录 slog 告警，UI 确认留阶段 E。
+- **项目配置信任**：已实现首次确认 + 持久化 + 自动审计；审计为启发式规则，不保证查杀所有后门；强制信任后不再自动拉黑。
 - **MCP 连接数**：每个 work agent 独立 MCP 集合可能启动多个子进程；`mcp.Manager` 按 server+workdir 复用连接，后续仍需上限策略。
 - **usage 缺失**：端点不返回 usage 时预算无法判定，仅记录日志，不静默通过。
-- **配置页**：项目配置 RPC 已就绪，但前端仍展示全局配置，阶段 E 统一改造。
+- **配置页**：已完成全局/项目分组、项目专属 MCP/Skill 与预算/压缩编辑。
+- **上下文压缩**：摘要可能丢失关键约束；失败时降级规则截断并保留最近轮；压缩本身消耗预算并计入上限。
 - **agent-smith 自动触发**：默认关闭；开启后失败/取消会自动消耗一次主模型调用。
 - **smith 修改范围**：每次只处理一个 work agent 的一次修改，不批量；不改主 Agent/全局配置。
 - **smith 备份**：`.aidog/agents/.backup` 保留最近 10 份；跨项目各自独立。

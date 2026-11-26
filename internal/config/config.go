@@ -86,6 +86,10 @@ type Config struct {
 	ShellWhitelist []string          `json:"shellWhitelist,omitempty"` // run_shell 允许的程序名（未配置时回退默认）
 	// AgentSmithAuto 任务失败/取消后自动运行 agent-smith（默认关闭）。
 	AgentSmithAuto bool `json:"agentSmithAuto,omitempty"`
+	// TrustedProjects 已确认信任的项目根（绝对路径，已规范化）。
+	TrustedProjects []string `json:"trustedProjects,omitempty"`
+	// BlockedProjects 审计高危自动拉黑的项目根（绝对路径）。
+	BlockedProjects []string `json:"blockedProjects,omitempty"`
 	// Project 项目级配置（运行时合并视图，不写入全局 config.json）。
 	Project *ProjectConfig `json:"-"`
 }
@@ -299,6 +303,16 @@ func (m *Manager) Effective(projectRoot string) Config {
 	if strings.TrimSpace(projectRoot) == "" {
 		return global
 	}
+	st, err := m.ProjectStatus(projectRoot)
+	if err != nil {
+		slog.Warn("项目配置审计失败，回退全局配置", "root", projectRoot, "err", err)
+		return global
+	}
+	if st.Status != ProjectTrusted {
+		slog.Warn("项目配置未信任或已拉黑，回退全局配置",
+			"root", projectRoot, "status", st.Status)
+		return global
+	}
 	pc, err := LoadProject(projectRoot)
 	if err != nil {
 		slog.Warn("加载项目级配置失败，回退全局配置", "root", projectRoot, "err", err)
@@ -351,5 +365,7 @@ func clone(c Config) Config {
 		out.MCPServers[i].Args = append([]string(nil), s.Args...)
 	}
 	out.ShellWhitelist = append([]string(nil), c.ShellWhitelist...)
+	out.TrustedProjects = append([]string(nil), c.TrustedProjects...)
+	out.BlockedProjects = append([]string(nil), c.BlockedProjects...)
 	return out
 }
