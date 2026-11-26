@@ -118,7 +118,7 @@ func TestBuildExplorerAgent(t *testing.T) {
 
 func TestBuildOrchestratorWithExplorer(t *testing.T) {
 	ws := setupProjectWS(t)
-	ag, err := BuildOrchestrator(context.Background(), ws, &fakeModel{}, nil, "", "", nil, PromptData{}, nil)
+	ag, err := BuildOrchestrator(context.Background(), ws, &fakeModel{}, nil, "", "", nil, PromptData{}, nil, Limits{})
 	if err != nil {
 		t.Fatalf("BuildOrchestrator 失败: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestBuildOrchestratorWithExplorer(t *testing.T) {
 func TestBuildOrchestratorWithWriteTools(t *testing.T) {
 	ws := setupProjectWS(t)
 	appr := approval.New(eventbus.New())
-	ag, err := BuildOrchestrator(context.Background(), ws, &fakeModel{}, appr, t.TempDir(), "s-test", nil, PromptData{}, nil)
+	ag, err := BuildOrchestrator(context.Background(), ws, &fakeModel{}, appr, t.TempDir(), "s-test", nil, PromptData{}, nil, Limits{})
 	if err != nil {
 		t.Fatalf("BuildOrchestrator(含写工具) 失败: %v", err)
 	}

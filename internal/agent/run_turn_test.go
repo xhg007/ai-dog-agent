@@ -67,7 +67,7 @@ func TestRunTurnCompletes(t *testing.T) {
 		chunks: []string{"你好", "，世界"},
 		usage:  &schema.TokenUsage{PromptTokens: 3, CompletionTokens: 4, TotalTokens: 7},
 	}
-	ag, err := BuildOrchestrator(context.Background(), ws, cm, nil, "", "sess-1", nil, PromptData{}, nil)
+	ag, err := BuildOrchestrator(context.Background(), ws, cm, nil, "", "sess-1", nil, PromptData{}, nil, Limits{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestRunTurnCanceled(t *testing.T) {
 	defer cancelSub()
 
 	cm := &streamScriptModel{chunks: []string{"x"}}
-	ag, err := BuildOrchestrator(context.Background(), ws, cm, nil, "", "sess-2", nil, PromptData{}, nil)
+	ag, err := BuildOrchestrator(context.Background(), ws, cm, nil, "", "sess-2", nil, PromptData{}, nil, Limits{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -56,6 +56,7 @@ type chatSession struct {
 	title         string             // 线程标题（取首条用户消息摘要）
 	modelName     string             // 构建 Agent 时使用的主模型显示名（chat_started 事件上报）
 	modelCfg      config.ModelConfig // 实际主模型配置（用量按真实模型归因）
+	limits        Limits             // 本轮执行上限（主 Agent 默认 + 项目覆盖）
 	createdAt     time.Time
 	lastActive    time.Time
 	messages      []StoredMessage // 持久化消息历史
@@ -298,6 +299,13 @@ func (s *ChatService) initAgentLocked(sess *chatSession) error {
 	}
 
 	prompt := s.buildPromptData()
+	// 项目级预算覆盖主 Agent 默认上限；无项目配置时用主 Agent 默认值。
+	eff := s.cfg.Effective(s.ws.Root())
+	var budget agentspec.Budget
+	if eff.Project != nil {
+		budget = eff.Project.Main.Budget
+	}
+	limits := MainLimits(budget)
 	// 外部 MCP 工具：启用的 server 懒连接并包装；单个 server 失败只跳过（不阻塞会话）
 	var mcpTools []tool.BaseTool
 	if s.mcpMgr != nil {
@@ -307,10 +315,10 @@ func (s *ChatService) initAgentLocked(sess *chatSession) error {
 	if s.ws.IsSet() {
 		// workspace 已设置：主 Agent 携带 explorer 分派工具 + 写操作审批工具 + 执行工具 + MCP 工具
 		ag, err = BuildOrchestrator(ctx, s.ws, cm, s.appr, s.backupRoot, sess.id,
-			s.cfg.ShellWhitelist(), prompt, mcpTools)
+			s.cfg.ShellWhitelist(), prompt, mcpTools, limits)
 	} else {
 		// 未设置 workspace：纯对话模式（仍可携带 MCP 工具）
-		ag, err = newPlainOrchestrator(ctx, cm, prompt, mcpTools)
+		ag, err = newPlainOrchestrator(ctx, cm, prompt, mcpTools, limits)
 	}
 	if err != nil {
 		return fmt.Errorf("构建 Agent 失败: %w", err)
@@ -323,6 +331,7 @@ func (s *ChatService) initAgentLocked(sess *chatSession) error {
 	// 记录主模型显示名与实际模型配置：chat_started 事件如实上报，用量按真实模型归因
 	sess.modelName = modelName
 	sess.modelCfg = modelCfg
+	sess.limits = limits
 	// 记录构建时的配置版本：Settings 保存后 configChanged 为 true，下一轮重建
 	sess.configVersion = s.cfg.Version()
 	slog.Info("会话 Agent 已构建", "session", sess.id, "agentId", sess.agentID,
@@ -381,16 +390,31 @@ func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
 	snapshot := marshalMessages(sess.messages)
 	agentID := sess.agentID
 	modelCfg := sess.modelCfg
+	limits := sess.limits
 	s.mu.Unlock()
-	// 观测上下文：会话/任务标识 + 消息快照 + 实际模型（用量归因）
-	runCtx := withObsInfo(ctx, &obsInfo{
+	// 执行计数与超时上下文（步骤/工具/Token/成本上限 + 最大执行时间）
+	exec, execCtx, execCancel := StartExecution(ctx, limits)
+	defer execCancel()
+	// 观测上下文：会话/任务标识 + 消息快照 + 实际模型（用量归因）+ 执行计数器
+	runCtx := withObsInfo(execCtx, &obsInfo{
 		SessionID: sessionID, TaskID: taskID, Snapshot: snapshot,
 		AgentID: agentID, ModelID: modelCfg.ID, ModelName: modelCfg.Name,
 		PriceIn: modelCfg.PriceIn, PriceOut: modelCfg.PriceOut,
+		Exec: exec,
 	})
-	iter := sess.runner.Run(runCtx, input)
+	iter := exec.Run(runCtx, sess.runner, input)
 	var sb []byte
 	var usage schema.TokenUsage
+
+	// 超限终止：保留已产出内容，按现有 failed 状态落库（B 阶段再换 FAILED 终态）。
+	finishLimited := func(err error) {
+		slog.Warn("执行超限终止", "session", sessionID, "err", err)
+		if len(sb) > 0 {
+			s.appendMessages(sess, StoredMessage{Role: "assistant", Content: string(sb)})
+		}
+		emitError(err.Error())
+		finishTask(store.StatusFailed, truncateTitle(err.Error()))
+	}
 
 	for {
 		ev, ok := iter.Next()
@@ -401,6 +425,10 @@ func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
 			if ctx.Err() != nil {
 				emitError("已中断")
 				finishTask(store.StatusInterrupted, "用户中断")
+				return
+			}
+			if terr := exec.Termination(execCtx); terr != nil {
+				finishLimited(terr)
 				return
 			}
 			slog.Error("Agent 执行错误", "session", sessionID, "err", ev.Err)
@@ -432,6 +460,15 @@ func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
 					break
 				}
 				if err != nil {
+					if ctx.Err() != nil {
+						emitError("已中断")
+						finishTask(store.StatusInterrupted, "用户中断")
+						return
+					}
+					if terr := exec.Termination(execCtx); terr != nil {
+						finishLimited(terr)
+						return
+					}
 					slog.Error("读取流失败", "session", sessionID, "err", err)
 					emitError(err.Error())
 					finishTask(store.StatusFailed, truncateTitle(err.Error()))
@@ -456,6 +493,11 @@ func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
 	if ctx.Err() != nil {
 		emitError("已中断")
 		finishTask(store.StatusInterrupted, "用户中断")
+		return
+	}
+	// 超时/超限也可能表现为迭代器正常结束：以执行计数器的终止原因为准
+	if err := exec.Termination(execCtx); err != nil {
+		finishLimited(err)
 		return
 	}
 

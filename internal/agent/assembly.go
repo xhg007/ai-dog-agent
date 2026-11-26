@@ -14,6 +14,7 @@ import (
 	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/compose"
 
+	"ai-dog-agent/internal/agentspec"
 	"ai-dog-agent/internal/approval"
 	"ai-dog-agent/internal/indexer"
 	"ai-dog-agent/internal/tools"
@@ -184,9 +185,13 @@ func OrchestratorTools(ctx context.Context, ws *workspace.Manager, cm model.Base
 
 // BuildOrchestrator 构建主 Agent（含 explorer 分派工具 + 写操作审批工具 + 执行工具 + MCP 工具）。
 // prompt 为动态提示词数据（项目上下文 / Skills / MCP / 项目 Agent）；extraTools 为外部 MCP 工具。
+// limits 为执行上限；零值时回退主 Agent 默认值。
 func BuildOrchestrator(ctx context.Context, ws *workspace.Manager, cm model.BaseChatModel,
 	appr *approval.Manager, backupRoot, sessionID string, whitelist []string,
-	prompt PromptData, extraTools []tool.BaseTool) (adk.Agent, error) {
+	prompt PromptData, extraTools []tool.BaseTool, limits Limits) (adk.Agent, error) {
+	if limits.MaxSteps <= 0 {
+		limits = MainLimits(agentspec.Budget{})
+	}
 	orchTools, err := OrchestratorTools(ctx, ws, cm, appr, backupRoot, sessionID, whitelist, extraTools)
 	if err != nil {
 		return nil, err
@@ -210,13 +215,17 @@ func BuildOrchestrator(ctx context.Context, ws *workspace.Manager, cm model.Base
 			ToolsNodeConfig:    compose.ToolsNodeConfig{Tools: orchTools},
 			EmitInternalEvents: true, // explorer 的内部事件流转发到主 Agent 事件流
 		},
-		ModelRetryConfig: retryConfig(),
+		MaxIterations:    limits.MaxSteps, // ADK 硬上限；步骤/工具/Token/成本由 Runtime 外层计数
+		ModelRetryConfig: retryConfig(limits.MaxRetries),
 	})
 }
 
 // newPlainOrchestrator 未设置 workspace 时的纯对话主 Agent（仍可携带 MCP 工具）。
 func newPlainOrchestrator(ctx context.Context, cm model.BaseChatModel,
-	prompt PromptData, extraTools []tool.BaseTool) (adk.Agent, error) {
+	prompt PromptData, extraTools []tool.BaseTool, limits Limits) (adk.Agent, error) {
+	if limits.MaxSteps <= 0 {
+		limits = MainLimits(agentspec.Budget{})
+	}
 	instruction, err := renderOrchestratorPrompt(prompt)
 	if err != nil {
 		return nil, err
@@ -226,7 +235,8 @@ func newPlainOrchestrator(ctx context.Context, cm model.BaseChatModel,
 		Description:      "ai-dog-agent 主 Agent",
 		Instruction:      instruction,
 		Model:            cm,
-		ModelRetryConfig: retryConfig(),
+		MaxIterations:    limits.MaxSteps,
+		ModelRetryConfig: retryConfig(limits.MaxRetries),
 	}
 	if len(extraTools) > 0 {
 		cfg.ToolsConfig = adk.ToolsConfig{
@@ -237,10 +247,13 @@ func newPlainOrchestrator(ctx context.Context, cm model.BaseChatModel,
 }
 
 // retryConfig 模型调用限流重试（参考 DeepSeek 限流：429 并发超限，
-// 指数退避重试；用户主动取消不重试）。
-func retryConfig() *adk.ModelRetryConfig {
+// 指数退避重试；用户主动取消不重试）。maxRetries<=0 时使用默认值。
+func retryConfig(maxRetries int) *adk.ModelRetryConfig {
+	if maxRetries <= 0 {
+		maxRetries = DefaultMaxRetries
+	}
 	return &adk.ModelRetryConfig{
-		MaxRetries: 3,
+		MaxRetries: maxRetries,
 		IsRetryAble: func(ctx context.Context, err error) bool {
 			return err != nil && ctx.Err() == nil
 		},

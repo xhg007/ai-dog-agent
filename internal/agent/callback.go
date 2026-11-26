@@ -35,6 +35,9 @@ type obsInfo struct {
 	ModelName string
 	PriceIn   float64
 	PriceOut  float64
+
+	// Exec 本次执行的资源计数器（步骤/工具/Token/成本上限）；nil 时不限流。
+	Exec *Execution
 }
 
 type obsKey struct{}
@@ -75,7 +78,11 @@ func newObsHandler(tasks *task.Manager) callbacks.Handler {
 		switch info.Component {
 		case components.ComponentOfChatModel:
 			if mo := model.ConvCallbackOutput(output); mo != nil {
-				recordModelUsage(tasks, obsFromCtx(ctx), info, mo.TokenUsage)
+				oi := obsFromCtx(ctx)
+				if oi != nil && oi.Exec != nil {
+					oi.Exec.AddLLM(mo.TokenUsage, oi.PriceIn, oi.PriceOut)
+				}
+				recordModelUsage(tasks, oi, info, mo.TokenUsage)
 			}
 		case components.ComponentOfTool:
 			oi := obsFromCtx(ctx)
@@ -113,7 +120,11 @@ func newObsHandler(tasks *task.Manager) callbacks.Handler {
 				usage = mo.TokenUsage
 			}
 		}
-		recordModelUsage(tasks, obsFromCtx(ctx), info, usage)
+		oi := obsFromCtx(ctx)
+		if oi != nil && oi.Exec != nil {
+			oi.Exec.AddLLM(usage, oi.PriceIn, oi.PriceOut)
+		}
+		recordModelUsage(tasks, oi, info, usage)
 		return ctx
 	})
 
@@ -123,6 +134,9 @@ func newObsHandler(tasks *task.Manager) callbacks.Handler {
 			return ctx
 		}
 		oi := obsFromCtx(ctx)
+		if oi != nil && oi.Exec != nil {
+			oi.Exec.AddToolCall()
+		}
 		if oi == nil || tasks == nil || oi.TaskID == "" {
 			return ctx
 		}
