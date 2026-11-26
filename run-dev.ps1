@@ -5,6 +5,9 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
+# 允许从任意目录调用：后续相对路径都相对于项目根
+Set-Location $PSScriptRoot
+
 # DuckDB 动态库模式：让 vss 扩展可用（静态预构建库下 INSTALL vss 会崩溃）。
 # 前置：libs/duckdb-shared-libs-windows-amd64 内有 duckdb.dll / duckdb.lib / duckdb.h。
 $libDir = (Resolve-Path ".\libs\duckdb-shared-libs-windows-amd64" -ErrorAction Stop).Path

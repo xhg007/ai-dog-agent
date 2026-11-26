@@ -12,6 +12,9 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
+# 允许从任意目录调用：后续相对路径都相对于项目根
+Set-Location $PSScriptRoot
+
 $libDir = (Resolve-Path ".\libs\duckdb-shared-libs-windows-amd64" -ErrorAction Stop).Path
 $env:CGO_ENABLED = "1"
 $env:CGO_CFLAGS = "-I$libDir"
