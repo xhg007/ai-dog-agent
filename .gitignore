@@ -22,4 +22,4 @@ m3-verify
 *.so
 *.dylib
 # DuckDB 动态库/头文件（59MB，构建时本地放置，不入仓）
-libs/
+/libs/
