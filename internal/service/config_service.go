@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 
 	"ai-dog-agent/internal/agentspec"
@@ -81,4 +82,62 @@ func (c *ConfigService) SaveProjectAgent(spec agentspec.Spec) error {
 // DeleteProjectAgent 删除一个项目级子 Agent 配置。
 func (c *ConfigService) DeleteProjectAgent(name string) error {
 	return agentspec.Delete(c.ws.Root(), name)
+}
+
+// GetProjectConfig 返回项目级配置（.aidog 目录；未设置工作区时返回空配置）。
+func (c *ConfigService) GetProjectConfig() (config.ProjectConfig, error) {
+	if !c.ws.IsSet() {
+		return config.ProjectConfig{}, nil
+	}
+	pc, err := config.LoadProject(c.ws.Root())
+	if err != nil {
+		return config.ProjectConfig{}, err
+	}
+	return *pc, nil
+}
+
+// SaveProjectConfig 保存项目级主 Agent 覆盖与项目专属 MCP/Skill。
+func (c *ConfigService) SaveProjectConfig(pc config.ProjectConfig) error {
+	if !c.ws.IsSet() {
+		return errors.New("未设置工作区，无法保存项目配置")
+	}
+	return config.SaveProject(c.ws.Root(), pc)
+}
+
+// GetProjectMCPServers 返回项目专属 MCP Server。
+func (c *ConfigService) GetProjectMCPServers() ([]config.MCPServerConfig, error) {
+	pc, err := c.GetProjectConfig()
+	if err != nil {
+		return nil, err
+	}
+	return pc.MCPServers, nil
+}
+
+// SaveProjectMCPServers 覆盖保存项目专属 MCP Server（保留主 Agent 覆盖与 Skill）。
+func (c *ConfigService) SaveProjectMCPServers(servers []config.MCPServerConfig) error {
+	pc, err := c.GetProjectConfig()
+	if err != nil {
+		return err
+	}
+	pc.MCPServers = servers
+	return c.SaveProjectConfig(pc)
+}
+
+// GetProjectSkills 返回项目专属 Skill。
+func (c *ConfigService) GetProjectSkills() ([]config.SkillConfig, error) {
+	pc, err := c.GetProjectConfig()
+	if err != nil {
+		return nil, err
+	}
+	return pc.Skills, nil
+}
+
+// SaveProjectSkills 覆盖保存项目专属 Skill（保留主 Agent 覆盖与 MCP）。
+func (c *ConfigService) SaveProjectSkills(skills []config.SkillConfig) error {
+	pc, err := c.GetProjectConfig()
+	if err != nil {
+		return err
+	}
+	pc.Skills = skills
+	return c.SaveProjectConfig(pc)
 }

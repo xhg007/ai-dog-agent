@@ -15,9 +15,13 @@ import (
 )
 
 // BodyAgentIDField Agent 唯一 ID 在请求体中的自定义字段名
-//（经 OpenAI 兼容协议的扩展字段随每次 chat.completions 请求上送）。
+// （经 OpenAI 兼容协议的扩展字段随每次 chat.completions 请求上送）。
 const BodyAgentIDField = "agent_id"
 const BodyUserIDField = "user_id"
+
+// BodyStreamOptionsField 流式请求选项字段；显式开启 IncludeUsage 时注入
+// stream_options.include_usage=true，否则部分端点末尾不返回 usage，预算无法核算。
+const BodyStreamOptionsField = "stream_options"
 
 // defaultModelTimeout 单次模型请求的默认超时（网络挂起时避免无限等待）。
 const defaultModelTimeout = 300 * time.Second
@@ -30,20 +34,26 @@ func modelTimeout(mc config.ModelConfig) time.Duration {
 	return time.Duration(mc.TimeoutSeconds) * time.Second
 }
 
-// extraFields 构造请求体扩展字段；关闭开关或 agentID 为空时返回空 map。
-// agentID 与 userID 分别注入：主 Agent 两者相同，work agent 的 userID 统一为主 Agent ID。
-// userID 为空时回退 agentID，兼容只关心 agent 身份的调用方。
+// extraFields 构造请求体扩展字段。
+// DisableExtraFields 为 true 时整体不注入（严格的 OpenAI 兼容端点会拒绝未知字段）。
+// agentID/userID 分别注入：主 Agent 两者相同，work agent 的 userID 统一为主 Agent ID；
+// userID 为空时回退 agentID。IncludeUsage 显式开启时注入 stream_options.include_usage。
 func extraFields(mc config.ModelConfig, agentID, userID string) map[string]any {
-	if mc.DisableExtraFields || agentID == "" {
-		return map[string]any{}
+	extra := map[string]any{}
+	if mc.DisableExtraFields {
+		return extra
 	}
-	if userID == "" {
-		userID = agentID
+	if agentID != "" {
+		if userID == "" {
+			userID = agentID
+		}
+		extra[BodyAgentIDField] = agentID
+		extra[BodyUserIDField] = userID
 	}
-	return map[string]any{
-		BodyAgentIDField: agentID,
-		BodyUserIDField:  userID,
+	if mc.IncludeUsage != nil && *mc.IncludeUsage {
+		extra[BodyStreamOptionsField] = map[string]any{"include_usage": true}
 	}
+	return extra
 }
 
 // BuildModel 根据模型配置构建 eino ChatModel；agentID 非空时注入请求体。

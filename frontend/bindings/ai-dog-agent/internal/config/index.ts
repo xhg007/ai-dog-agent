@@ -5,5 +5,7 @@ export type {
     Config,
     MCPServerConfig,
     ModelConfig,
+    ProjectConfig,
+    ProjectMain,
     SkillConfig
 } from "./models.js";

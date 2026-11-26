@@ -15,15 +15,55 @@ import (
 // AgentID 是该子 Agent 的唯一不变 ID（UUID 无连字符）：
 // 保存时缺省自动生成并固化；后续实例化/归因/缓存均以此为准。
 type Spec struct {
-	AgentID      string   `json:"agent_id,omitempty"`
-	Name         string   `json:"name"`
-	Description  string   `json:"description"`
-	SystemPrompt string   `json:"system_prompt"`
-	Model        string   `json:"model,omitempty"`
-	Tools        []string `json:"tools,omitempty"`
-	Skills       []string `json:"skills,omitempty"`
-	MCPServers   []string `json:"mcp_servers,omitempty"`
-	MaxTurns     int      `json:"max_turns,omitempty"`
+	AgentID      string        `json:"agent_id,omitempty"`
+	Name         string        `json:"name"`
+	Description  string        `json:"description"`
+	SystemPrompt string        `json:"system_prompt"`
+	Model        string        `json:"model,omitempty"`
+	Tools        []string      `json:"tools,omitempty"`
+	Skills       []string      `json:"skills,omitempty"`
+	MCPServers   []string      `json:"mcp_servers,omitempty"`
+	MaxTurns     int           `json:"max_turns,omitempty"`
+	Budget       Budget        `json:"budget,omitzero"`
+	Context      ContextConfig `json:"context,omitzero"`
+}
+
+// Budget 单次 Agent 执行的资源上限；零值表示使用 Runtime 默认值。
+type Budget struct {
+	MaxSteps           int     `json:"max_steps,omitempty"`            // 最大执行步骤
+	MaxTokens          int64   `json:"max_tokens,omitempty"`           // 最大累计 token（API usage）
+	MaxDurationSeconds int     `json:"max_duration_seconds,omitempty"` // 最大执行时间
+	MaxToolCalls       int     `json:"max_tool_calls,omitempty"`       // 最大工具调用次数
+	MaxCost            float64 `json:"max_cost,omitempty"`             // 单任务预算（元）
+	MaxRetries         int     `json:"max_retries,omitempty"`          // 模型错误重试次数
+}
+
+// ContextConfig 上下文压缩策略；零值表示使用默认值。
+type ContextConfig struct {
+	CompressThreshold float64 `json:"compress_threshold,omitempty"` // 触发压缩的窗口占比 (0,1]
+	KeepRecent        int     `json:"keep_recent,omitempty"`        // 保留最近轮数
+}
+
+// DefaultCompressThreshold / DefaultKeepRecent 上下文压缩默认值。
+const (
+	DefaultCompressThreshold = 0.7
+	DefaultKeepRecent        = 6
+)
+
+// EffectiveThreshold 返回生效的压缩阈值（未配置时取默认值）。
+func (c ContextConfig) EffectiveThreshold() float64 {
+	if c.CompressThreshold > 0 {
+		return c.CompressThreshold
+	}
+	return DefaultCompressThreshold
+}
+
+// EffectiveKeepRecent 返回生效的保留轮数（未配置时取默认值）。
+func (c ContextConfig) EffectiveKeepRecent() int {
+	if c.KeepRecent > 0 {
+		return c.KeepRecent
+	}
+	return DefaultKeepRecent
 }
 
 // Dir 返回项目级 Agent 配置目录。
@@ -67,6 +107,18 @@ func validate(spec Spec) error {
 	}
 	if strings.TrimSpace(spec.SystemPrompt) == "" {
 		return errors.New("system_prompt 不能为空")
+	}
+	b := spec.Budget
+	if b.MaxSteps < 0 || b.MaxTokens < 0 || b.MaxDurationSeconds < 0 ||
+		b.MaxToolCalls < 0 || b.MaxCost < 0 || b.MaxRetries < 0 {
+		return errors.New("budget 各项不能为负")
+	}
+	c := spec.Context
+	if c.CompressThreshold < 0 || c.CompressThreshold > 1 {
+		return errors.New("context.compress_threshold 必须在 [0,1] 范围内（0 表示默认值）")
+	}
+	if c.KeepRecent < 0 {
+		return errors.New("context.keep_recent 不能为负")
 	}
 	return nil
 }

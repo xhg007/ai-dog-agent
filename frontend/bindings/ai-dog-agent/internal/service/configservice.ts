@@ -54,6 +54,27 @@ export function GetProjectAgents(): $CancellablePromise<agentspec$0.Spec[] | nul
 }
 
 /**
+ * GetProjectConfig 返回项目级配置（.aidog 目录；未设置工作区时返回空配置）。
+ */
+export function GetProjectConfig(): $CancellablePromise<config$0.ProjectConfig> {
+    return $Call.ByID(3489640804);
+}
+
+/**
+ * GetProjectMCPServers 返回项目专属 MCP Server。
+ */
+export function GetProjectMCPServers(): $CancellablePromise<config$0.MCPServerConfig[] | null> {
+    return $Call.ByID(3102148854);
+}
+
+/**
+ * GetProjectSkills 返回项目专属 Skill。
+ */
+export function GetProjectSkills(): $CancellablePromise<config$0.SkillConfig[] | null> {
+    return $Call.ByID(2623001336);
+}
+
+/**
  * SaveConfig 保存配置（含校验：模型字段/ID 唯一/activeModelId 有效性）。
  */
 export function SaveConfig(cfg: config$0.Config): $CancellablePromise<void> {
@@ -65,6 +86,27 @@ export function SaveConfig(cfg: config$0.Config): $CancellablePromise<void> {
  */
 export function SaveProjectAgent(spec: agentspec$0.Spec): $CancellablePromise<void> {
     return $Call.ByID(191178672, spec);
+}
+
+/**
+ * SaveProjectConfig 保存项目级主 Agent 覆盖与项目专属 MCP/Skill。
+ */
+export function SaveProjectConfig(pc: config$0.ProjectConfig): $CancellablePromise<void> {
+    return $Call.ByID(1534257473, pc);
+}
+
+/**
+ * SaveProjectMCPServers 覆盖保存项目专属 MCP Server（保留主 Agent 覆盖与 Skill）。
+ */
+export function SaveProjectMCPServers(servers: config$0.MCPServerConfig[] | null): $CancellablePromise<void> {
+    return $Call.ByID(3217961295, servers);
+}
+
+/**
+ * SaveProjectSkills 覆盖保存项目专属 Skill（保留主 Agent 覆盖与 MCP）。
+ */
+export function SaveProjectSkills(skills: config$0.SkillConfig[] | null): $CancellablePromise<void> {
+    return $Call.ByID(2760452569, skills);
 }
 
 /**

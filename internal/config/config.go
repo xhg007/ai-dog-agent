@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +28,22 @@ type ModelConfig struct {
 	// DisableExtraFields 关闭请求体的 agent_id/user_id 扩展字段；
 	// 部分严格的 OpenAI 兼容端点会拒绝未知字段（400）。
 	DisableExtraFields bool `json:"disableExtraFields,omitempty"`
+	// ContextWindow 模型上下文窗口（tokens）；0 表示按 DefaultContextWindow 保守估算。
+	ContextWindow int `json:"contextWindow,omitempty"`
+	// IncludeUsage 流式请求注入 stream_options.include_usage（保证末尾带 usage）；
+	// nil 或不开启时不注入，兼容拒绝未知字段的端点。
+	IncludeUsage *bool `json:"includeUsage,omitempty"`
+}
+
+// DefaultContextWindow 未配置上下文窗口时的保守估算（tokens）。
+const DefaultContextWindow = 32000
+
+// EffectiveContextWindow 返回生效的上下文窗口（未配置时取保守默认值）。
+func (mc ModelConfig) EffectiveContextWindow() int {
+	if mc.ContextWindow > 0 {
+		return mc.ContextWindow
+	}
+	return DefaultContextWindow
 }
 
 // SkillConfig 可复用的技能指令包（启用后追加到主 Agent 动态上下文）。
@@ -67,6 +84,8 @@ type Config struct {
 	Skills         []SkillConfig     `json:"skills"`
 	MCPServers     []MCPServerConfig `json:"mcpServers"`
 	ShellWhitelist []string          `json:"shellWhitelist,omitempty"` // run_shell 允许的程序名（未配置时回退默认）
+	// Project 项目级配置（运行时合并视图，不写入全局 config.json）。
+	Project *ProjectConfig `json:"-"`
 }
 
 // Manager 配置管理器，线程安全。
@@ -188,6 +207,9 @@ func validateConfig(cfg Config) error {
 		if strings.TrimSpace(mc.Model) == "" {
 			return fmt.Errorf("模型 %q 缺少 model（模型 ID）", mc.Name)
 		}
+		if mc.ContextWindow < 0 {
+			return fmt.Errorf("模型 %q 的 contextWindow 不能为负", mc.Name)
+		}
 	}
 	if cfg.ActiveModelID != "" && !modelIDs[cfg.ActiveModelID] {
 		return fmt.Errorf("activeModelId 指向不存在的模型: %s", cfg.ActiveModelID)
@@ -267,6 +289,26 @@ func (m *Manager) persistLocked() error {
 	return nil
 }
 
+// Effective 返回全局配置与项目级配置（<projectRoot>/.aidog）合并后的副本。
+// 项目配置只在内存合并，不写入全局 config.json；加载失败时记录警告并回退全局配置，
+// 不阻塞会话（项目配置坏了不应导致应用不可用）。
+func (m *Manager) Effective(projectRoot string) Config {
+	global := m.Get()
+	if strings.TrimSpace(projectRoot) == "" {
+		return global
+	}
+	pc, err := LoadProject(projectRoot)
+	if err != nil {
+		slog.Warn("加载项目级配置失败，回退全局配置", "root", projectRoot, "err", err)
+		return global
+	}
+	merged, warnings := MergeProject(global, pc)
+	for _, w := range warnings {
+		slog.Warn("项目级配置引用无效", "root", projectRoot, "warning", w)
+	}
+	return merged
+}
+
 // ActiveModel 返回当前激活的模型配置。
 func (m *Manager) ActiveModel() (ModelConfig, error) {
 	m.mu.RLock()
@@ -292,7 +334,13 @@ func (m *Manager) ShellWhitelist() []string {
 func clone(c Config) Config {
 	out := c
 	out.Models = make([]ModelConfig, len(c.Models))
-	copy(out.Models, c.Models)
+	for i, mc := range c.Models {
+		out.Models[i] = mc
+		if mc.IncludeUsage != nil {
+			v := *mc.IncludeUsage
+			out.Models[i].IncludeUsage = &v
+		}
+	}
 	out.Skills = make([]SkillConfig, len(c.Skills))
 	copy(out.Skills, c.Skills)
 	out.MCPServers = make([]MCPServerConfig, len(c.MCPServers))
