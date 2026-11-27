@@ -232,6 +232,43 @@ func TestSearchCodeMaxResults(t *testing.T) {
 	}
 }
 
+func TestSearchCodeSymbolContext(t *testing.T) {
+	ws := setupWS(t)
+	root := ws.Root()
+	writeFile(t, root, "a.go", `package a
+
+func Foo() {
+	// needle
+}
+`)
+	hits, err := SearchCode(ws, "needle", "", false, 10)
+	if err != nil {
+		t.Fatalf("SearchCode 失败: %v", err)
+	}
+	if len(hits) != 1 {
+		t.Fatalf("应命中 1 处，got %+v", hits)
+	}
+	h := hits[0]
+	if h.Symbol != "Foo" || h.Kind != "func" || h.StartLine != 3 || h.EndLine != 5 {
+		t.Fatalf("命中行未附带正确符号上下文: %+v", h)
+	}
+}
+
+func TestSearchCodeFallbackWithoutSymbol(t *testing.T) {
+	ws := setupWS(t)
+	writeFile(t, ws.Root(), "note.unknownext", "needle here\n")
+	hits, err := SearchCode(ws, "needle", "", false, 10)
+	if err != nil {
+		t.Fatalf("SearchCode 失败: %v", err)
+	}
+	if len(hits) != 1 {
+		t.Fatalf("应命中 1 处，got %+v", hits)
+	}
+	if hits[0].Symbol != "" || hits[0].Kind != "" {
+		t.Fatalf("不支持索引的文件应降级为纯文本: %+v", hits[0])
+	}
+}
+
 // ---------- git 只读封装 ----------
 
 func TestGitReadOnlyWhitelist(t *testing.T) {

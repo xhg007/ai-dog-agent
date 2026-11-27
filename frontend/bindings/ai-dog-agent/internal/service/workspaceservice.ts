@@ -39,7 +39,7 @@ export function GitStatus(): $CancellablePromise<string> {
 }
 
 /**
- * SetWorkspace 设置工作区（校验并持久化到配置）。
+ * SetWorkspace 设置工作区（校验并持久化到配置）；切换时释放旧项目的符号索引。
  */
 export function SetWorkspace(path: string): $CancellablePromise<void> {
     return $Call.ByID(765574625, path);

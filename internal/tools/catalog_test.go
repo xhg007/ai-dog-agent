@@ -42,7 +42,7 @@ func TestCatalog_EmptyDefaultsReadOnly(t *testing.T) {
 		t.Fatalf("Catalog: %v", err)
 	}
 	names := catalogToolNames(t, list)
-	want := []string{ToolReadFile, ToolListFiles, ToolSearchCode, ToolGitDiff, ToolGitStatus}
+	want := []string{ToolReadFile, ToolListFiles, ToolSearchCode, ToolSearchSymbols, ToolGitDiff, ToolGitStatus}
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Fatalf("默认只读集合不符: %v", names)
 	}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"ai-dog-agent/internal/config"
+	"ai-dog-agent/internal/indexer/treesitter"
 	"ai-dog-agent/internal/tools"
 	"ai-dog-agent/internal/workspace"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -18,13 +19,18 @@ func NewWorkspaceService(mgr *config.Manager, ws *workspace.Manager) *WorkspaceS
 	return &WorkspaceService{mgr: mgr, ws: ws}
 }
 
-// SetWorkspace 设置工作区（校验并持久化到配置）。
+// SetWorkspace 设置工作区（校验并持久化到配置）；切换时释放旧项目的符号索引。
 func (s *WorkspaceService) SetWorkspace(path string) error {
+	old := s.ws.Root()
 	if err := s.ws.SetRoot(path); err != nil {
 		return err
 	}
+	newRoot := s.ws.Root()
+	if old != "" && old != newRoot {
+		treesitter.Release(old)
+	}
 	cfg := s.mgr.Get()
-	cfg.WorkspacePath = s.ws.Root()
+	cfg.WorkspacePath = newRoot
 	return s.mgr.Save(cfg)
 }
 

@@ -18,28 +18,29 @@ import (
 
 // 工具名常量（与 InferTool 注册名保持一致）。
 const (
-	ToolReadFile   = "read_file"
-	ToolListFiles  = "list_files"
-	ToolSearchCode = "search_code"
-	ToolGitDiff    = "git_diff"
-	ToolGitStatus  = "git_status"
-	ToolWriteFile  = "write_file"
-	ToolEditFile   = "edit_file"
-	ToolGoTest     = "go_test"
-	ToolGoVet      = "go_vet"
-	ToolGoBuild    = "go_build"
-	ToolRunShell   = "run_shell"
+	ToolReadFile      = "read_file"
+	ToolListFiles     = "list_files"
+	ToolSearchCode    = "search_code"
+	ToolSearchSymbols = "search_symbols"
+	ToolGitDiff       = "git_diff"
+	ToolGitStatus     = "git_status"
+	ToolWriteFile     = "write_file"
+	ToolEditFile      = "edit_file"
+	ToolGoTest        = "go_test"
+	ToolGoVet         = "go_vet"
+	ToolGoBuild       = "go_build"
+	ToolRunShell      = "run_shell"
 )
 
 // DefaultReadOnlyTools 空工具配置时的默认集合（只读，安全默认）。
 var DefaultReadOnlyTools = []string{
-	ToolReadFile, ToolListFiles, ToolSearchCode, ToolGitDiff, ToolGitStatus,
+	ToolReadFile, ToolListFiles, ToolSearchCode, ToolSearchSymbols, ToolGitDiff, ToolGitStatus,
 }
 
 // KnownToolNames 返回目录中的全部工具名（错误信息与前端提示用）。
 func KnownToolNames() []string {
 	return []string{
-		ToolReadFile, ToolListFiles, ToolSearchCode, ToolGitDiff, ToolGitStatus,
+		ToolReadFile, ToolListFiles, ToolSearchCode, ToolSearchSymbols, ToolGitDiff, ToolGitStatus,
 		ToolWriteFile, ToolEditFile, ToolGoTest, ToolGoVet, ToolGoBuild, ToolRunShell,
 	}
 }

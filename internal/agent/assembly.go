@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -17,6 +18,7 @@ import (
 	"ai-dog-agent/internal/agentspec"
 	"ai-dog-agent/internal/approval"
 	"ai-dog-agent/internal/indexer"
+	"ai-dog-agent/internal/indexer/treesitter"
 	"ai-dog-agent/internal/tools"
 	"ai-dog-agent/internal/workspace"
 )
@@ -63,21 +65,65 @@ func BuildProjectContext(ws *workspace.Manager) (string, error) {
 		fmt.Fprintf(&sb, "\n## README 摘要\n%s\n", readmeExcerpt)
 	}
 
-	if syms, err := indexer.ScanSymbols(root); err == nil && len(syms) > 0 {
-		fmt.Fprintf(&sb, "\n## 符号概览（共 %d 个，前 80 个）\n", len(syms))
-		n := len(syms)
-		if n > 80 {
-			n = 80
+	// 多语言符号概览：tree-sitter 索引优先；失败或为空时回退 Go-only。
+	wroteSymbols := false
+	if idx := treesitter.ForWorkspace(root); idx != nil {
+		if err := idx.EnsureFresh(context.Background()); err == nil {
+			if syms := idx.Symbols(); len(syms) > 0 {
+				writeSymbolOverview(&sb, idx, syms)
+				wroteSymbols = true
+			}
 		}
-		for _, s := range syms[:n] {
-			if s.Recv != "" {
-				fmt.Fprintf(&sb, "- %s %s.%s (%s:%d)\n", s.Kind, s.Recv, s.Name, s.File, s.Line)
-			} else {
-				fmt.Fprintf(&sb, "- %s %s (%s:%d)\n", s.Kind, s.Name, s.File, s.Line)
+	}
+	if !wroteSymbols {
+		if syms, err := indexer.ScanSymbols(root); err == nil && len(syms) > 0 {
+			fmt.Fprintf(&sb, "\n## 符号概览（共 %d 个，前 80 个）\n", len(syms))
+			n := len(syms)
+			if n > 80 {
+				n = 80
+			}
+			for _, s := range syms[:n] {
+				if s.Recv != "" {
+					fmt.Fprintf(&sb, "- %s %s.%s (%s:%d)\n", s.Kind, s.Recv, s.Name, s.File, s.Line)
+				} else {
+					fmt.Fprintf(&sb, "- %s %s (%s:%d)\n", s.Kind, s.Name, s.File, s.Line)
+				}
 			}
 		}
 	}
 	return sb.String(), nil
+}
+
+// writeSymbolOverview 输出多语言符号概览（语言统计 + 前 80 个符号）。
+func writeSymbolOverview(sb *strings.Builder, idx *treesitter.Index, syms []treesitter.Symbol) {
+	fmt.Fprintf(sb, "\n## 符号概览（共 %d 个，前 80 个）\n", len(syms))
+	stats := idx.Stats()
+	if len(stats.ByLanguage) > 0 {
+		langs := make([]string, 0, len(stats.ByLanguage))
+		for lang := range stats.ByLanguage {
+			langs = append(langs, lang)
+		}
+		sort.Strings(langs)
+		sb.WriteString("语言统计: ")
+		for i, lang := range langs {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			fmt.Fprintf(sb, "%s %d", lang, stats.ByLanguage[lang])
+		}
+		sb.WriteString("\n")
+	}
+	n := len(syms)
+	if n > 80 {
+		n = 80
+	}
+	for _, s := range syms[:n] {
+		recv := ""
+		if s.Recv != "" {
+			recv = " (" + s.Recv + ")"
+		}
+		fmt.Fprintf(sb, "- %s %s%s (%s:%d) [%s]\n", s.Kind, s.Name, recv, s.File, s.Line, s.Language)
+	}
 }
 
 // projectMarkers 返回项目根目录下常见的构建/包管理文件名（语言与构建系统线索）。

@@ -3,10 +3,12 @@ package tools
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
 
+	"ai-dog-agent/internal/indexer/treesitter"
 	"ai-dog-agent/internal/workspace"
 )
 
@@ -31,11 +33,18 @@ type searchArgs struct {
 	MaxCount int    `json:"max_results,omitempty" jsonschema:"结果上限(默认100)"`
 }
 
+type searchSymbolsArgs struct {
+	Pattern  string `json:"pattern" jsonschema:"符号名称子串(空为全部)"`
+	Kind     string `json:"kind,omitempty" jsonschema:"符号类型: func/method/class/interface/struct/type/enum/trait/protocol/module"`
+	Language string `json:"language,omitempty" jsonschema:"语言过滤: go/typescript/tsx/javascript/python/rust/java/c/cpp/csharp/kotlin/swift/ruby/php/bash"`
+	MaxCount int    `json:"max_results,omitempty" jsonschema:"结果上限(默认100)"`
+}
+
 // NoArgs 空参数结构（无参数工具使用）。
 type NoArgs struct{}
 
 // ReadOnlyToolset 构建只读工具集（免审批）：
-// read_file / list_files / search_code / git_diff / git_status。
+// read_file / list_files / search_code / search_symbols / git_diff / git_status。
 func ReadOnlyToolset(ws *workspace.Manager) []tool.BaseTool {
 	toolList, err := buildAll(ws)
 	if err != nil {
@@ -96,6 +105,11 @@ func buildAll(ws *workspace.Manager) ([]tool.BaseTool, error) {
 			}
 			out := fmt.Sprintf("共 %d 处命中:\n", len(hits))
 			for _, h := range hits {
+				if h.Symbol != "" {
+					out += fmt.Sprintf("%s:%d: %s  [%s %s L%d-L%d]\n",
+						h.File, h.Line, h.Text, h.Kind, h.Symbol, h.StartLine, h.EndLine)
+					continue
+				}
 				out += fmt.Sprintf("%s:%d: %s\n", h.File, h.Line, h.Text)
 			}
 			return out, nil
@@ -104,6 +118,35 @@ func buildAll(ws *workspace.Manager) ([]tool.BaseTool, error) {
 		return nil, err
 	}
 	toolList = append(toolList, searchCodeTool)
+
+	searchSymbolsTool, err := utils.InferTool("search_symbols",
+		"按名称/类型检索代码符号（函数/方法/类/接口/结构体等），跨语言。返回 文件:行号 类型 名称。",
+		func(ctx context.Context, a searchSymbolsArgs) (string, error) {
+			root := ws.Root()
+			if root == "" {
+				return "", workspace.ErrNoWorkspace
+			}
+			idx := treesitter.ForWorkspace(root)
+			_ = idx.EnsureFresh(ctx) // 刷新失败时使用已有缓存
+			syms := idx.SearchSymbols(a.Pattern, treesitter.SymbolKind(a.Kind), a.Language, a.MaxCount)
+			if len(syms) == 0 {
+				return "未找到匹配符号", nil
+			}
+			var sb strings.Builder
+			fmt.Fprintf(&sb, "共 %d 个符号:\n", len(syms))
+			for _, s := range syms {
+				recv := ""
+				if s.Recv != "" {
+					recv = " (" + s.Recv + ")"
+				}
+				fmt.Fprintf(&sb, "%s:%d %s %s%s [%s]\n", s.File, s.Line, s.Kind, s.Name, recv, s.Language)
+			}
+			return sb.String(), nil
+		})
+	if err != nil {
+		return nil, err
+	}
+	toolList = append(toolList, searchSymbolsTool)
 
 	gitDiffTool, err := utils.InferTool("git_diff",
 		"查看 workspace 相对 HEAD 的未提交变更 diff。",

@@ -5,6 +5,7 @@ package tools
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"ai-dog-agent/internal/indexer/treesitter"
 	"ai-dog-agent/internal/workspace"
 )
 
@@ -38,9 +40,13 @@ type FileEntry struct {
 
 // SearchHit 检索命中。
 type SearchHit struct {
-	File string `json:"file"`
-	Line int    `json:"line"`
-	Text string `json:"text"`
+	File      string `json:"file"`
+	Line      int    `json:"line"`
+	Text      string `json:"text"`
+	Kind      string `json:"kind,omitempty"`
+	Symbol    string `json:"symbol,omitempty"`
+	StartLine int    `json:"startLine,omitempty"`
+	EndLine   int    `json:"endLine,omitempty"`
 }
 
 // ReadFile 读取 workspace 内文本文件，返回带行号内容。
@@ -201,6 +207,12 @@ func SearchCode(ws *workspace.Manager, pattern, glob string, isRegex bool, maxRe
 		return nil, workspace.ErrNoWorkspace
 	}
 
+	// 符号索引用于给命中行附加所属函数/类；索引不可用时降级为纯文本检索。
+	idx := treesitter.ForWorkspace(root)
+	if err := idx.EnsureFresh(context.Background()); err != nil {
+		idx = nil
+	}
+
 	var re *regexp.Regexp
 	if isRegex {
 		var err error
@@ -236,10 +248,20 @@ func SearchCode(ws *workspace.Manager, pattern, glob string, isRegex bool, maxRe
 			return nil
 		}
 		rel, _ := filepath.Rel(root, p)
+		rel = filepath.ToSlash(rel)
 		lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
 		for i, line := range lines {
 			if re.MatchString(line) {
-				hits = append(hits, SearchHit{File: rel, Line: i + 1, Text: truncate(line, 300)})
+				hit := SearchHit{File: rel, Line: i + 1, Text: truncate(line, 300)}
+				if idx != nil {
+					if sym := idx.SymbolAt(rel, i+1); sym != nil {
+						hit.Kind = string(sym.Kind)
+						hit.Symbol = sym.Name
+						hit.StartLine = sym.StartLine
+						hit.EndLine = sym.EndLine
+					}
+				}
+				hits = append(hits, hit)
 				if len(hits) >= maxResults {
 					return filepath.SkipAll
 				}

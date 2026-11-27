@@ -71,6 +71,37 @@ func TestBuildProjectContextNoWorkspace(t *testing.T) {
 	}
 }
 
+// 多语言项目摘要：符号概览应包含非 Go 符号与语言统计。
+func TestBuildProjectContextMultiLanguage(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, content string) {
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.mod", "module demo\n\ngo 1.26\n")
+	write("main.go", "package main\n\nfunc main() {}\n")
+	write("app.py", "class App:\n    def run(self):\n        pass\n")
+
+	ws := workspace.New()
+	if err := ws.SetRoot(root); err != nil {
+		t.Fatal(err)
+	}
+	ctxText, err := BuildProjectContext(ws)
+	if err != nil {
+		t.Fatalf("BuildProjectContext: %v", err)
+	}
+	for _, want := range []string{"语言统计", "python", "App", "run", "[python]"} {
+		if !strings.Contains(ctxText, want) {
+			t.Fatalf("多语言符号概览缺少 %q:\n%s", want, ctxText)
+		}
+	}
+}
+
 // 非 Go 项目也应给出语言/构建线索，而不是“非 Go Module”。
 func TestBuildProjectContextNonGo(t *testing.T) {
 	root := t.TempDir()
