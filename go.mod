@@ -61,11 +61,6 @@ require (
 	github.com/yargevad/filepathx v1.0.0 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
-	go.duckdb.org/libduckdb/darwin-amd64 v0.20001.0 // indirect
-	go.duckdb.org/libduckdb/darwin-arm64 v0.20001.0 // indirect
-	go.duckdb.org/libduckdb/linux-amd64 v0.20001.0 // indirect
-	go.duckdb.org/libduckdb/linux-arm64 v0.20001.0 // indirect
-	go.duckdb.org/libduckdb/windows-amd64 v0.20001.0 // indirect
 	golang.org/x/arch v0.11.0 // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
