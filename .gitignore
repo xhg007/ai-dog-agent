@@ -21,6 +21,8 @@ m3-verify
 *.dll
 *.so
 *.dylib
+# 图标转换脚本的旧图标备份（多套 logo 切换用）
+/.icon-backups/
 # DuckDB 动态库/头文件（59MB，构建时本地放置，不入仓）
 /libs/
 /vendor

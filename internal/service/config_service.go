@@ -7,6 +7,7 @@ import (
 
 	"ai-dog-agent/internal/agentspec"
 	"ai-dog-agent/internal/config"
+	"ai-dog-agent/internal/tools"
 	"ai-dog-agent/internal/workspace"
 )
 
@@ -23,10 +24,21 @@ func NewConfigService(mgr *config.Manager, ws *workspace.Manager) *ConfigService
 
 // GetConfig 返回当前配置（含模型 / Skills / MCP Server）。
 // ShellWhitelist 为空时填充默认白名单，保证前端设置页展示生效值。
+// 另附用户级目录技能（~/.agents/skills，Source=user-dir），仅供只读展示；
+// 保存时由 config.Manager.Save 过滤，不会写回 config.yml。
 func (c *ConfigService) GetConfig() config.Config {
 	cfg := c.mgr.Get()
 	if len(cfg.ShellWhitelist) == 0 {
 		cfg.ShellWhitelist = config.DefaultShellWhitelist()
+	}
+	cfg.Skills = append(cfg.Skills, c.mgr.UserDiscoveredSkills()...)
+	// 工具目录：供 Agent 配置页多选与 agent-smith 参考（运行时字段，不落盘）。
+	// 先清空再填充，避免前端保存回传后在内存中重复累积。
+	cfg.ToolCatalog = nil
+	for _, t := range tools.ToolOptions() {
+		cfg.ToolCatalog = append(cfg.ToolCatalog, config.ToolOption{
+			Name: t.Name, Description: t.Description, Group: t.Group,
+		})
 	}
 	return cfg
 }
@@ -130,6 +142,8 @@ func (c *ConfigService) UnblockProject() error {
 }
 
 // GetProjectConfig 返回项目级配置（.aidog 目录；未设置工作区时返回空配置）。
+// 项目已信任时附加 .aidog/skills 目录技能（Source=project-dir，只读展示）；
+// 保存时由 config.SaveProject 过滤，不会写回 skills.yml。
 func (c *ConfigService) GetProjectConfig() (config.ProjectConfig, error) {
 	if !c.ws.IsSet() {
 		return config.ProjectConfig{}, nil
@@ -137,6 +151,9 @@ func (c *ConfigService) GetProjectConfig() (config.ProjectConfig, error) {
 	pc, err := config.LoadProject(c.ws.Root())
 	if err != nil {
 		return config.ProjectConfig{}, err
+	}
+	if st, serr := c.mgr.ProjectStatus(c.ws.Root()); serr == nil && st.Status == config.ProjectTrusted {
+		pc.Skills = append(pc.Skills, config.ProjectDiscoveredSkills(c.ws.Root())...)
 	}
 	return *pc, nil
 }

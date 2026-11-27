@@ -201,7 +201,7 @@ func BuildExplorer(ctx context.Context, ws *workspace.Manager, cm model.BaseChat
 
 // OrchestratorTools 主 Agent 工具：分派 explorer 子 Agent + 写操作（审批门）+ 执行类工具（M4）
 // + 外部 MCP 工具（extraTools）。
-// whitelist 为 Shell 白名单（run_shell 白名单内免审批；go_test/go_vet/go_build 免审批）。
+// whitelist 为 Shell 白名单（run_shell 白名单内免审批；devtools 只读工具免审批）。
 func OrchestratorTools(ctx context.Context, ws *workspace.Manager, cm model.BaseChatModel,
 	appr *approval.Manager, backupRoot, sessionID string, whitelist []string,
 	extraTools []tool.BaseTool) ([]tool.BaseTool, error) {
@@ -220,8 +220,8 @@ func OrchestratorTools(ctx context.Context, ws *workspace.Manager, cm model.Base
 	if appr != nil {
 		toolList = append(toolList, tools.WriteToolset(ws, backupRoot, appr, sessionID)...)
 	}
-	// Go 构建工具（go_test / go_vet / go_build）：白名单内免审批（FR-3.1/3.2）
-	toolList = append(toolList, tools.GoToolset(ws)...)
+	// devtools（Go/Rust/Python 文档查询 + 本地分析 + Go 代码检查）：只读、免审批
+	toolList = append(toolList, tools.DevToolset(ws)...)
 	// run_shell：白名单内免审批，白名单外经审批门（FR-4.2）
 	shellTool, err := tools.ShellTool(ws, whitelist, appr, sessionID)
 	if err != nil {

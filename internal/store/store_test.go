@@ -109,7 +109,7 @@ func TestCheckpoints(t *testing.T) {
 	cps := []Checkpoint{
 		{TaskID: "t1", Seq: 1, Phase: "before", ToolName: "edit_file", ToolArgs: `{"path":"a.go"}`, Messages: `[{"role":"user"}]`},
 		{TaskID: "t1", Seq: 2, Phase: "after", ToolName: "edit_file", ToolResult: `{"ok":true}`},
-		{TaskID: "t1", Seq: 3, Phase: "before", ToolName: "go_test", ToolArgs: `{}`, Messages: `[{"role":"user"},{"role":"assistant"}]`},
+		{TaskID: "t1", Seq: 3, Phase: "before", ToolName: "dev_validate_go_code", ToolArgs: `{}`, Messages: `[{"role":"user"},{"role":"assistant"}]`},
 	}
 	for _, c := range cps {
 		if err := s.AppendCheckpoint(c); err != nil {

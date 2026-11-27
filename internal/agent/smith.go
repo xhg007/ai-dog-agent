@@ -25,6 +25,7 @@ import (
 	"ai-dog-agent/internal/config"
 	"ai-dog-agent/internal/eventbus"
 	"ai-dog-agent/internal/llm"
+	"ai-dog-agent/internal/prompts"
 	"ai-dog-agent/internal/store"
 	"ai-dog-agent/internal/task"
 	"ai-dog-agent/internal/tools"
@@ -86,6 +87,8 @@ type SmithInput struct {
 	Task        *store.Task
 	Events      []store.TaskEvent
 	Agents      []agentspec.Spec
+	Tools       []tools.ToolOption
+	Models      []config.ModelConfig
 	Skills      []config.SkillConfig
 	MCPServers  []config.MCPServerConfig
 	ProjectRoot string
@@ -103,7 +106,9 @@ func (s *Smith) collectInput(tr SmithTrigger) (*SmithInput, error) {
 		return nil, fmt.Errorf("读取项目 Agent 配置失败: %w", err)
 	}
 	in.Agents = agents
+	in.Tools = tools.ToolOptions()
 	eff := s.cfg.Effective(root)
+	in.Models = eff.Models
 	in.Skills = eff.Skills
 	in.MCPServers = eff.MCPServers
 
@@ -176,66 +181,121 @@ const (
 	smithMaxCost   = 0.4
 )
 
-// buildSmithPrompt 组装 system（固定前缀）与 user（任务/配置快照）提示词。
+// smithSystemData smith system 模板数据。
+type smithSystemData struct {
+	ToolNames  string
+	ToolGroups string
+}
+
+// smithEventView 事件摘要（Payload 截断后交给模板）。
+type smithEventView struct {
+	Type    string
+	Payload string
+}
+
+// smithSkillView Skill 摘要（Prompt 截断后交给模板）。
+type smithSkillView struct {
+	ID            string
+	Name          string
+	Description   string
+	Enabled       bool
+	PromptSummary string
+}
+
+// smithMCPView MCP 摘要（只暴露类型，不暴露 URL/Command）。
+type smithMCPView struct {
+	ID      string
+	Name    string
+	Kind    string
+	Enabled bool
+}
+
+// smithPromptData smith user 模板数据。
+type smithPromptData struct {
+	SessionID  string
+	TaskID     string
+	Task       *store.Task
+	Events     []smithEventView
+	AgentsJSON string
+	Tools      []tools.ToolOption
+	Models     []config.ModelConfig
+	Skills     []smithSkillView
+	MCPServers []smithMCPView
+}
+
+// buildSmithPrompt 渲染 system（固定前缀）与 user（任务/配置快照）提示词。
+// 文本位于 internal/prompts/smith_*.tmpl，这里只负责数据整形。
 func buildSmithPrompt(in *SmithInput) (string, string, error) {
-	system := `你是 ai-dog-agent 的后台优化 Agent（agent-smith），负责根据失败/中断任务与现有配置优化项目级 work agent。
-
-约束：
-1. 只允许新增或修改一个 work agent（.aidog/agents/*.yml），不得修改全局配置或主 Agent。
-2. tools 只能从以下列表选择：` + strings.Join(tools.KnownToolNames(), ", ") + `。
-3. model 必须是现有模型配置的 ID/Name/Model；不确定时留空（跟随主模型）。
-4. 不得编造不存在的 Skill/MCP；不确定时留空。
-5. 输出必须是单个 JSON 对象，不要 Markdown 代码块或额外文字。
-
-JSON 结构：
-{"action":"create|update|skip","name":"agent 名称","spec":{"name":"...","description":"...","system_prompt":"...","model":"...","tools":["..."],"skills":["..."],"mcp_servers":["..."],"max_turns":12,"budget":{"max_steps":12,"max_tokens":150000,"max_duration_seconds":600,"max_tool_calls":30,"max_cost":1.5,"max_retries":3},"context":{"compress_threshold":0.7,"keep_recent":6}},"reason":"..."}
-- action=skip 时 spec 可为空，并用 reason 说明原因。
-- 修改现有 Agent 时 name 必须与现有配置一致；新增时使用新的简短名称。`
-
-	var sb strings.Builder
-	sb.WriteString("# 触发信息\n")
-	fmt.Fprintf(&sb, "session: %s\n", in.Trigger.SessionID)
-	if in.Task != nil {
-		fmt.Fprintf(&sb, "task: %s\nstatus: %s\nerror: %s\n", in.Task.ID, in.Task.Status, in.Task.Error)
-	} else if in.Trigger.TaskID != "" {
-		fmt.Fprintf(&sb, "task: %s（未找到任务记录）\n", in.Trigger.TaskID)
-	} else {
-		sb.WriteString("task: 手动触发\n")
-	}
-
-	sb.WriteString("\n# 最近任务事件\n")
-	if len(in.Events) == 0 {
-		sb.WriteString("（无事件记录）\n")
-	}
-	for _, ev := range in.Events {
-		fmt.Fprintf(&sb, "- %s: %s\n", ev.Type, truncateForSmith(ev.Payload, 300))
+	system, err := prompts.Render("smith_system.tmpl", smithSystemData{
+		ToolNames:  strings.Join(tools.KnownToolNames(), ", "),
+		ToolGroups: strings.Join(tools.KnownToolGroups(), ", "),
+	})
+	if err != nil {
+		return "", "", err
 	}
 
 	agentsJSON, err := json.MarshalIndent(in.Agents, "", "  ")
 	if err != nil {
 		return "", "", fmt.Errorf("序列化现有 Agent 配置失败: %w", err)
 	}
-	sb.WriteString("\n# 当前项目 Agent 配置\n```json\n")
-	sb.Write(agentsJSON)
-	sb.WriteString("\n```\n")
 
-	sb.WriteString("\n# 可用 Skills\n")
-	if len(in.Skills) == 0 {
-		sb.WriteString("（无）\n")
+	user, err := prompts.Render("smith_user.tmpl", smithPromptData{
+		SessionID:  in.Trigger.SessionID,
+		TaskID:     in.Trigger.TaskID,
+		Task:       in.Task,
+		Events:     smithEventViews(in.Events),
+		AgentsJSON: string(agentsJSON),
+		Tools:      in.Tools,
+		Models:     in.Models,
+		Skills:     smithSkillViews(in.Skills),
+		MCPServers: smithMCPViews(in.MCPServers),
+	})
+	if err != nil {
+		return "", "", err
 	}
-	for _, sk := range in.Skills {
-		fmt.Fprintf(&sb, "- %s / %s：%s（enabled=%v）\n", sk.ID, sk.Name, sk.Description, sk.Enabled)
-	}
+	return system, user, nil
+}
 
-	sb.WriteString("\n# 可用 MCP Server\n")
-	if len(in.MCPServers) == 0 {
-		sb.WriteString("（无）\n")
+func smithEventViews(events []store.TaskEvent) []smithEventView {
+	out := make([]smithEventView, 0, len(events))
+	for _, ev := range events {
+		out = append(out, smithEventView{
+			Type:    ev.Type,
+			Payload: truncateForSmith(ev.Payload, 300),
+		})
 	}
-	for _, m := range in.MCPServers {
-		fmt.Fprintf(&sb, "- %s / %s（enabled=%v）\n", m.ID, m.Name, m.Enabled)
-	}
+	return out
+}
 
-	return system, sb.String(), nil
+func smithSkillViews(skills []config.SkillConfig) []smithSkillView {
+	out := make([]smithSkillView, 0, len(skills))
+	for _, sk := range skills {
+		summary := ""
+		if p := strings.TrimSpace(sk.Prompt); p != "" {
+			summary = truncateForSmith(p, 160)
+		}
+		out = append(out, smithSkillView{
+			ID:            sk.ID,
+			Name:          sk.Name,
+			Description:   sk.Description,
+			Enabled:       sk.Enabled,
+			PromptSummary: summary,
+		})
+	}
+	return out
+}
+
+func smithMCPViews(servers []config.MCPServerConfig) []smithMCPView {
+	out := make([]smithMCPView, 0, len(servers))
+	for _, m := range servers {
+		out = append(out, smithMCPView{
+			ID:      m.ID,
+			Name:    m.Name,
+			Kind:    mcpTransportLabel(m),
+			Enabled: m.Enabled,
+		})
+	}
+	return out
 }
 
 func truncateForSmith(s string, n int) string {
@@ -349,7 +409,7 @@ func (s *Smith) parseAndValidate(in *SmithInput, raw string) (*SmithProposal, er
 		knownTools[n] = true
 	}
 	for _, t := range p.Spec.Tools {
-		if !knownTools[t] {
+		if !knownTools[t] && t != tools.ToolGroupDevTools {
 			return nil, fmt.Errorf("smith 指定了未知工具: %s", t)
 		}
 	}
@@ -387,6 +447,17 @@ func containsMCPRef(servers []config.MCPServerConfig, ref string) bool {
 		}
 	}
 	return false
+}
+
+// mcpTransportLabel 返回 MCP 连接类型（不暴露 URL/Command，避免密钥进入提示词）。
+func mcpTransportLabel(m config.MCPServerConfig) string {
+	if m.Transport != "" {
+		return m.Transport
+	}
+	if strings.TrimSpace(m.Command) != "" {
+		return "stdio"
+	}
+	return "http"
 }
 
 // ErrSmithRejected 用户拒绝了 smith 的配置修改。

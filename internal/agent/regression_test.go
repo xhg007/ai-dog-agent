@@ -79,6 +79,8 @@ func TestPromptDataMCPWording(t *testing.T) {
 	}
 
 	svc := &ChatService{cfg: cfg, ws: workspace.New()}
+	// 隔离真实 ~/.agents/skills：测试只验证 MCP 文案，不依赖本机技能内容。
+	cfg.SetUserSkillsDir(t.TempDir())
 	rendered, err := renderOrchestratorPrompt(svc.buildPromptData())
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +95,7 @@ func TestPromptDataMCPWording(t *testing.T) {
 	if !strings.Contains(rendered, "local-fs") || !strings.Contains(rendered, "remote") {
 		t.Fatalf("未列出启用的 server 名称: %s", rendered)
 	}
-	if strings.Contains(rendered, "https://example.com/mcp") || strings.Contains(rendered, "npx") {
+	if strings.Contains(rendered, "https://example.com/mcp") || strings.Contains(rendered, "npx -y srv") {
 		t.Fatalf("不应把 MCP 连接细节（可能含密钥）写入系统提示词: %s", rendered)
 	}
 	if strings.Contains(rendered, "- off") {

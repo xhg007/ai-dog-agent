@@ -66,6 +66,7 @@ ai-dog-agent 是一个运行在用户桌面上的 AI 编码 Agent 工具：用�
 约束：
 
 - **子 Agent 定义（Schema）**：`{ name, description, system_prompt, model(可选覆盖), tools[], skills[], mcp_servers[], max_turns }`。
+- **Skill 来源**：全局 `config.yml` 的 `skills` → `~/.agents/skills/<name>/SKILL.md` → 项目 `.aidog/skills.yml` → `<workspace>/.aidog/skills/<name>/SKILL.md`，优先级依次升高；目录来源（frontmatter 支持 `name` / `description` / `enabled`，正文为指令）在设置页只读展示，不写回 YAML。
 - **上下文前缀稳定**：所有 Agent 的 system prompt 采用「稳定静态前缀 + 动态尾部」结构——角色定义、工具说明、输出规范等静态内容在前，项目信息、任务上下文等动态内容追加在后；保证供应商提示词缓存（KV cache）命中，降低成本与首 Token 延迟。
 - **隔离**：子 Agent 的工具调用同样经过统一安全层（workspace 限制、白名单、审批），但其可用工具集由自身配置决定。
 
@@ -83,7 +84,9 @@ ai-dog-agent/
 │   │   ├── search.go          #   search_code（字面 + 正则）
 │   │   ├── git.go             #   git_diff / git_status（只读）
 │   │   ├── shell.go           #   run_shell（白名单校验 + 审批）
-│   │   └── gotool.go          #   go_test / go_vet / go_build（阶段三）
+│   │   ├── devtools.go        #   devtools 文档查询（Go/Rust/Python，9 个）
+│   │   └── devtools_local.go  #   devtools 本地工具（tree/search/markdown/outline/validate，5 个）
+│   ├── devtools/              # 移植自 go-dev-mcp 的文档解析与本地分析逻辑（无 MCP 依赖）
 │   ├── indexer/               # 项目索引：目录树、go.mod 解析、tree-sitter 符号表
 │   ├── agent/                 # 编排层（Eino ADK）
 │   │   ├── orchestrator.go    #   主 Agent：制定计划、分派子 Agent、汇总
@@ -177,8 +180,8 @@ ai-dog-agent/
 
 | ID | 需求 | 验收标准 |
 |---|---|---|
-| FR-3.1 | `go_test(dir?, run?, verbose?)` | 执行 `go test ./...`，截断超长输出，结构化提取失败用例与错误行 |
-| FR-3.2 | `go_vet` / `go_build` | 同上模式；返回非零退出码 + stderr 摘要 |
+| FR-3.1 | 测试执行 | 通过 `run_shell` 执行 `go test ./...`（默认白名单内免审批），截断超长输出 |
+| FR-3.2 | 静态检查 | `dev_validate_go_code` 执行 go vet / go build -n / gofmt -l / go mod tidy -diff 并汇总结果 |
 | FR-3.3 | 编译错误分析 | fixer 子 Agent 解析错误（文件/行号/信息），调用 read/edit 修复 |
 | FR-3.4 | 自动修复循环 | 「测试失败 → 分析 → 修复 → 重测」循环；`max_fix_rounds` 默认 3，超限终止并输出未解决清单 |
 | FR-3.5 | 输出保护 | 命令超时（默认 120s）、输出截断（默认 64KB）、并发限制（同时 1 个 Shell 任务） |

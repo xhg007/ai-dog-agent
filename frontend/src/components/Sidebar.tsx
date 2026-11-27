@@ -45,7 +45,9 @@ export default function Sidebar({ threads, activeId, wsPath, sideView, onSideVie
   return (
     <aside className="sidebar">
       <div className="brand">
-        <div className="brand-logo">AI</div>
+        <div className="brand-logo">
+          <img src="/logo.svg" alt="ai-dog-agent" />
+        </div>
         <div className="brand-name">
           ai-dog-agent
           <small>多 Agent 编码助手</small>

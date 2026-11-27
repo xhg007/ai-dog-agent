@@ -1,0 +1,136 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="AI 硅基大黄狗 Logo v2 赛博傻狗">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B0F1E"/>
+      <stop offset="1" stop-color="#16224A"/>
+    </linearGradient>
+    <linearGradient id="fur" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFD34D"/>
+      <stop offset="1" stop-color="#F5A623"/>
+    </linearGradient>
+    <linearGradient id="ear" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#E8940F"/>
+      <stop offset="1" stop-color="#C97A06"/>
+    </linearGradient>
+    <linearGradient id="prog" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#0FB5E8"/>
+      <stop offset="1" stop-color="#43E6FF"/>
+    </linearGradient>
+    <radialGradient id="eye" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#CFFBFF"/>
+      <stop offset="0.45" stop-color="#43E6FF"/>
+      <stop offset="1" stop-color="#0FB5E8"/>
+    </radialGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0 H0 V32" fill="none" stroke="#3FD9FF" stroke-opacity="0.09" stroke-width="1"/>
+    </pattern>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="7" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- 底座 + 网格 -->
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#bg)"/>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#grid)"/>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="none" stroke="#3D5BBF" stroke-opacity="0.55" stroke-width="3"/>
+
+  <!-- HUD 四角取景框 -->
+  <g stroke="#3FD9FF" stroke-opacity="0.55" stroke-width="4" fill="none" stroke-linecap="round">
+    <path d="M44 66 V44 H66"/>
+    <path d="M446 44 H468 V66"/>
+    <path d="M44 446 V468 H66"/>
+    <path d="M446 468 H468 V446"/>
+  </g>
+  <text x="84" y="62" font-family="'Courier New', monospace" font-size="16" fill="#3FD9FF" opacity="0.75">&gt; DOG.AI.CODE</text>
+
+  <!-- 侧面电路 -->
+  <g stroke="#3FD9FF" stroke-width="4" fill="none" stroke-linecap="round" opacity="0.5">
+    <path d="M52 268 H84 L96 280"/>
+    <path d="M460 268 H428 L416 280"/>
+  </g>
+  <g fill="#3FD9FF" opacity="0.7">
+    <circle cx="52" cy="268" r="5"/>
+    <circle cx="460" cy="268" r="5"/>
+  </g>
+
+  <!-- 歪头狗主体 -->
+  <g transform="rotate(-6 256 280)">
+    <!-- 立起的左耳（带扬声器孔，硅基喇叭） -->
+    <path d="M158 214 C 118 192 102 140 116 94 C 121 79 139 80 147 95 C 168 132 194 162 206 178 C 214 189 208 203 194 208 C 182 212 168 216 158 214 Z" fill="url(#ear)"/>
+    <g fill="#7A4E06" opacity="0.85">
+      <circle cx="134" cy="122" r="3.5"/>
+      <circle cx="152" cy="128" r="3.5"/>
+      <circle cx="141" cy="144" r="3.5"/>
+      <circle cx="157" cy="150" r="3.5"/>
+      <circle cx="130" cy="146" r="3.5"/>
+      <circle cx="147" cy="164" r="3.5"/>
+    </g>
+
+    <!-- 垂下的右耳（画在头后侧，露出外缘） -->
+    <path d="M340 184 C 396 170 424 216 414 280 C 408 320 368 330 352 300 C 342 282 342 244 344 214 C 345 196 334 186 340 184 Z" fill="url(#ear)"/>
+    <path d="M398 214 C 410 238 412 262 406 286" fill="none" stroke="#C97A06" stroke-width="4" stroke-linecap="round" opacity="0.6"/>
+
+    <!-- 头部面板 -->
+    <circle cx="256" cy="280" r="132" fill="url(#fur)"/>
+    <path d="M168 206 A 118 118 0 0 1 236 166" fill="none" stroke="#FFFFFF" stroke-opacity="0.25" stroke-width="12" stroke-linecap="round"/>
+
+    <!-- 面板接缝 + 螺丝 -->
+    <path d="M140 224 Q 256 198 372 224" fill="none" stroke="#D98A0A" stroke-width="4" opacity="0.85"/>
+    <g>
+      <circle cx="140" cy="224" r="8" fill="#B8720A" stroke="#7A4E06" stroke-width="2"/>
+      <line x1="135" y1="220" x2="145" y2="228" stroke="#7A4E06" stroke-width="2.5" stroke-linecap="round"/>
+      <circle cx="372" cy="224" r="8" fill="#B8720A" stroke="#7A4E06" stroke-width="2"/>
+      <line x1="367" y1="220" x2="377" y2="228" stroke="#7A4E06" stroke-width="2.5" stroke-linecap="round"/>
+    </g>
+
+    <!-- 左脸颊散热栅 -->
+    <g stroke="#D98A0A" stroke-width="3.5" stroke-linecap="round" opacity="0.8">
+      <line x1="146" y1="352" x2="164" y2="352"/>
+      <line x1="144" y1="362" x2="162" y2="362"/>
+      <line x1="146" y1="372" x2="164" y2="372"/>
+    </g>
+
+    <!-- 天线（信号球呼吸闪烁） -->
+    <path d="M292 158 C 298 126 318 112 336 100" fill="none" stroke="#8FA3C8" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="340" cy="96" r="9" fill="#43E6FF" filter="url(#glow)">
+      <animate attributeName="r" values="9;12;9" dur="2s" repeatCount="indefinite"/>
+    </circle>
+
+    <!-- 腮红 -->
+    <circle cx="184" cy="348" r="13" fill="#FF9E3D" opacity="0.45"/>
+    <circle cx="334" cy="348" r="13" fill="#FF9E3D" opacity="0.45"/>
+
+    <!-- 玻璃面罩后隐约的傻乐眼睛 -->
+    <circle cx="208" cy="286" r="15" fill="url(#eye)" opacity="0.55"/>
+    <circle cx="304" cy="286" r="12" fill="url(#eye)" opacity="0.55"/>
+
+    <!-- VR 终端面罩：汪_ -->
+    <rect x="148" y="246" width="216" height="80" rx="32" fill="#0D1B2E" fill-opacity="0.84" stroke="#3FD9FF" stroke-width="4"/>
+    <path d="M176 316 L232 252 L254 252 L198 316 Z" fill="#FFFFFF" opacity="0.10"/>
+    <text x="250" y="302" text-anchor="middle" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="40" font-weight="800" fill="#43E6FF">汪</text>
+    <rect x="286" y="276" width="11" height="24" fill="#43E6FF">
+      <animate attributeName="opacity" values="1;1;0;0;1" keyTimes="0;0.45;0.45;0.9;0.9" dur="1.4s" repeatCount="indefinite"/>
+    </rect>
+    <!-- 故障风错位像素 -->
+    <rect x="140" y="252" width="12" height="9" fill="#FF3D81" opacity="0.75"/>
+    <rect x="356" y="298" width="14" height="9" fill="#43E6FF" opacity="0.8"/>
+
+    <!-- 口鼻：咧嘴吐舌 -->
+    <ellipse cx="256" cy="372" rx="70" ry="46" fill="#FFF1CB"/>
+    <path d="M240 334 h32 q10 0 6 10 l-17 18 q-5 5 -10 0 l-17 -18 q-4 -10 6 -10 Z" fill="#2A1A0C"/>
+    <path d="M216 366 Q 256 406 296 366 Q 256 386 216 366 Z" fill="#6B2A1E"/>
+    <path d="M270 382 C 272 408 280 426 294 432 C 308 437 316 428 312 417 C 307 402 294 390 283 382 Z" fill="#FF7E9C"/>
+    <path d="M288 392 C 292 406 296 416 301 424" fill="none" stroke="#E05578" stroke-width="2.5" stroke-linecap="round"/>
+    <!-- 口水滴 -->
+    <path d="M322 430 C 318 440 315 447 321 453 C 327 459 334 452 331 444 C 329 438 324 434 322 430 Z" fill="#9BE8FF" opacity="0.85"/>
+  </g>
+
+  <!-- 加载狗粮进度条 -->
+  <rect x="156" y="462" width="200" height="14" rx="7" fill="#0E1E38" stroke="#2E4470" stroke-width="1.5"/>
+  <rect x="159" y="465" width="164" height="8" rx="4" fill="url(#prog)"/>
+  <text x="256" y="492" text-anchor="middle" font-family="'Noto Sans SC','Microsoft YaHei',sans-serif" font-size="13" fill="#7FDFFF">加载狗粮中… 87%</text>
+</svg>

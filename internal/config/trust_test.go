@@ -12,6 +12,8 @@ func newTrustManager(t *testing.T) (*Manager, string) {
 	if err != nil {
 		t.Fatalf("NewManagerAt: %v", err)
 	}
+	// 隔离真实 ~/.agents/skills，避免测试结果受本机技能目录影响。
+	m.userSkillsDir = t.TempDir()
 	return m, dir
 }
 

@@ -95,11 +95,26 @@ var auditLineRules = []auditLineRule{
 
 // 与 tools.KnownToolNames() 对齐（audit 在底层 config 包，避免反向依赖）。
 var auditKnownTools = map[string]bool{
-	"read_file": true, "list_files": true, "search_code": true,
+	"read_file": true, "list_files": true, "search_code": true, "search_symbols": true,
 	"git_diff": true, "git_status": true,
 	"write_file": true, "edit_file": true,
-	"go_test": true, "go_vet": true, "go_build": true,
 	"run_shell": true,
+	// devtools 工具组及成员（移植自 go-dev-mcp）。
+	"devtools":                  true,
+	"dev_search_godoc":          true,
+	"dev_read_godoc":            true,
+	"dev_search_within_godoc":   true,
+	"dev_search_rustdoc":        true,
+	"dev_read_rustdoc":          true,
+	"dev_search_within_rustdoc": true,
+	"dev_search_pydoc":          true,
+	"dev_read_pydoc":            true,
+	"dev_search_within_pydoc":   true,
+	"dev_tree_dir":              true,
+	"dev_search_local_files":    true,
+	"dev_scan_markdown":         true,
+	"dev_outline_go_package":    true,
+	"dev_validate_go_code":      true,
 }
 
 // AuditProject 扫描项目 .aidog 配置并返回审计报告。

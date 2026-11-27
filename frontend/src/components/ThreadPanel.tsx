@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import type { ComponentType } from 'react'
 import { Events } from '@wailsio/runtime'
 import {
-  ArrowDown, Bot, Check, Compass, Copy, FileText, FlaskConical, Folder, GitBranch, Hammer,
-  Microscope, Pencil, Search, SendHorizontal, Square, Terminal, Wrench,
+  ArrowDown, BookOpen, Bot, Check, Compass, Copy, FileCode, FileSearch, FileText,
+  Folder, FolderTree, GitBranch, Pencil, Search, SendHorizontal, ShieldCheck, Square,
+  Terminal, Wrench,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -41,7 +42,12 @@ const toolIcons: Record<string, ComponentType<{ className?: string }>> = {
   git_diff: GitBranch, git_status: GitBranch, project_summary: Compass,
   dispatch_explorer: Compass,
   write_file: Pencil, edit_file: Pencil,
-  run_shell: Terminal, go_test: FlaskConical, go_vet: Microscope, go_build: Hammer,
+  run_shell: Terminal,
+  dev_search_godoc: BookOpen, dev_read_godoc: BookOpen, dev_search_within_godoc: BookOpen,
+  dev_search_rustdoc: BookOpen, dev_read_rustdoc: BookOpen, dev_search_within_rustdoc: BookOpen,
+  dev_search_pydoc: BookOpen, dev_read_pydoc: BookOpen, dev_search_within_pydoc: BookOpen,
+  dev_tree_dir: FolderTree, dev_search_local_files: FileSearch, dev_scan_markdown: FileCode,
+  dev_outline_go_package: FileCode, dev_validate_go_code: ShieldCheck,
 }
 
 // settleRunningCards 把没等到结果的工具卡片标记为结束。

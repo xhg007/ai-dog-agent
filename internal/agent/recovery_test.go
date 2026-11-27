@@ -53,7 +53,7 @@ func TestRebuildRecoveryMessages(t *testing.T) {
 // TestRebuildRecoveryMessages_NoBefore 无 before 快照：仅续跑指令。
 func TestRebuildRecoveryMessages_NoBefore(t *testing.T) {
 	after := &store.Checkpoint{
-		Seq: 2, Phase: "after", ToolName: "go_test", ToolResult: "all ok",
+		Seq: 2, Phase: "after", ToolName: "dev_validate_go_code", ToolResult: "all ok",
 	}
 	msgs, err := rebuildRecoveryMessages(nil, after)
 	if err != nil {

@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"ai-dog-agent/internal/skills"
 )
 
 // ModelConfig 一个 OpenAI 兼容模型配置。
@@ -67,6 +69,46 @@ type SkillConfig struct {
 	Description string `json:"description" yaml:"description"`
 	Prompt      string `json:"prompt" yaml:"prompt"`
 	Enabled     bool   `json:"enabled" yaml:"enabled"`
+	// Source 运行时来源标记，不落盘：空=YAML 配置，user-dir/project-dir=目录扫描（只读）。
+	Source string `json:"source,omitempty" yaml:"-"`
+}
+
+// Skill 目录来源（运行时标记，不写入 config.yml / skills.yml）。
+const (
+	SkillSourceUserDir    = "user-dir"
+	SkillSourceProjectDir = "project-dir"
+)
+
+// IsDirectorySkill 判断 Skill 是否来自目录扫描（只读，不写回 YAML）。
+func IsDirectorySkill(s SkillConfig) bool {
+	return s.Source == SkillSourceUserDir || s.Source == SkillSourceProjectDir
+}
+
+// FilterPersistedSkills 返回可写入 YAML 的 Skill（过滤目录来源，防止回写污染）。
+func FilterPersistedSkills(list []SkillConfig) []SkillConfig {
+	out := make([]SkillConfig, 0, len(list))
+	for _, s := range list {
+		if !IsDirectorySkill(s) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// skillConfigsFromDiscovered 把目录扫描结果转换为 SkillConfig。
+func skillConfigsFromDiscovered(list []skills.Skill, source string) []SkillConfig {
+	out := make([]SkillConfig, 0, len(list))
+	for _, s := range list {
+		out = append(out, SkillConfig{
+			ID:          s.ID,
+			Name:        s.Name,
+			Description: s.Description,
+			Prompt:      s.Prompt,
+			Enabled:     s.Enabled,
+			Source:      source,
+		})
+	}
+	return out
 }
 
 // MCPServerConfig 外部 MCP Server 配置。
@@ -90,6 +132,13 @@ type MCPServerConfig struct {
 	AutoApproveReadOnly bool `json:"autoApproveReadOnly,omitempty" yaml:"autoApproveReadOnly,omitempty"`
 }
 
+// ToolOption 工具目录项（运行时由 service 填充供设置页展示，不落盘）。
+type ToolOption struct {
+	Name        string `json:"name" yaml:"name"`
+	Description string `json:"description" yaml:"description"`
+	Group       string `json:"group,omitempty" yaml:"group,omitempty"`
+}
+
 // Config 应用配置根对象。
 type Config struct {
 	Providers      []ProviderConfig  `json:"providers,omitempty" yaml:"providers,omitempty"`
@@ -99,6 +148,8 @@ type Config struct {
 	Skills         []SkillConfig     `json:"skills" yaml:"skills"`
 	MCPServers     []MCPServerConfig `json:"mcpServers" yaml:"mcpServers"`
 	ShellWhitelist []string          `json:"shellWhitelist,omitempty" yaml:"shellWhitelist,omitempty"` // run_shell 允许的程序名（未配置时回退默认）
+	// ToolCatalog 工具目录（运行时填充，供设置页多选；不落盘）。
+	ToolCatalog []ToolOption `json:"toolCatalog,omitempty" yaml:"-"`
 	// AgentSmithAuto 任务失败/取消后自动运行 agent-smith（默认关闭）。
 	AgentSmithAuto bool `json:"agentSmithAuto,omitempty" yaml:"agentSmithAuto,omitempty"`
 	// TrustedProjects 已确认信任的项目根（绝对路径，已规范化）。
@@ -115,6 +166,10 @@ type Manager struct {
 	path    string
 	cfg     Config
 	version uint64 // 每次成功保存递增（用于判断 Agent 是否需要重建）
+
+	// userSkillsDir 用户级技能目录；空表示使用 skills.UserDir()。
+	// 主要供测试注入，生产环境保持为空。
+	userSkillsDir string
 }
 
 // Dir 返回配置目录（并确保存在）。
@@ -251,6 +306,10 @@ func (m *Manager) Get() Config {
 // Save 覆盖保存配置。保存前校验，避免把不可用的模型链写进磁盘：
 // 模型 ID/Name/Model 非空且 ID 唯一；ActiveModelID 非空时必须指向已存在的模型。
 func (m *Manager) Save(cfg Config) error {
+	// 目录扫描的 Skill 是只读来源，写盘前剔除，避免前端全量回写污染 config.yml。
+	cfg.Skills = FilterPersistedSkills(cfg.Skills)
+	// ToolCatalog 由 GetConfig 每次填充，不进入内存/磁盘配置，避免重复累积。
+	cfg.ToolCatalog = nil
 	if err := validateConfig(cfg); err != nil {
 		return err
 	}
@@ -391,8 +450,13 @@ func (m *Manager) persistLocked() error {
 // Effective 返回全局配置与项目级配置（<projectRoot>/.aidog）合并后的副本。
 // 项目配置只在内存合并，不写入全局 config.yml；加载失败时记录警告并回退全局配置，
 // 不阻塞会话（项目配置坏了不应导致应用不可用）。
+//
+// Skill 合并优先级（低→高）：全局 config.yml → ~/.agents/skills →
+// 项目 skills.yml → <projectRoot>/.aidog/skills。项目目录仅在项目已信任时加载。
 func (m *Manager) Effective(projectRoot string) Config {
 	global := m.Get()
+	// 用户级目录技能：不依赖项目信任，始终加载（优先级高于全局 YAML）。
+	global.Skills = mergeSkills(global.Skills, m.UserDiscoveredSkills())
 	if strings.TrimSpace(projectRoot) == "" {
 		return global
 	}
@@ -415,8 +479,51 @@ func (m *Manager) Effective(projectRoot string) Config {
 	for _, w := range warnings {
 		slog.Warn("项目级配置引用无效", "root", projectRoot, "warning", w)
 	}
+	// 项目目录技能优先级最高：仅信任项目加载，覆盖同名 YAML/用户目录技能。
+	merged.Skills = mergeSkills(merged.Skills, ProjectDiscoveredSkills(projectRoot))
 	applyProviders(&merged)
 	return merged
+}
+
+// SetUserSkillsDir 覆盖用户级技能目录（空串恢复默认 ~/.agents/skills）。
+// 仅影响运行时读取，不写入磁盘配置；主要供测试与自定义部署使用。
+func (m *Manager) SetUserSkillsDir(dir string) {
+	m.mu.Lock()
+	m.userSkillsDir = dir
+	m.mu.Unlock()
+}
+
+// UserDiscoveredSkills 返回 ~/.agents/skills 下的技能（只读，带 Source）。
+func (m *Manager) UserDiscoveredSkills() []SkillConfig {
+	m.mu.RLock()
+	dir := m.userSkillsDir
+	m.mu.RUnlock()
+	if dir == "" {
+		var err error
+		dir, err = skills.UserDir()
+		if err != nil {
+			slog.Warn("解析用户技能目录失败", "err", err)
+			return nil
+		}
+	}
+	list, warnings := skills.Discover(dir)
+	for _, w := range warnings {
+		slog.Warn("用户技能目录", "warning", w)
+	}
+	return skillConfigsFromDiscovered(list, SkillSourceUserDir)
+}
+
+// ProjectDiscoveredSkills 返回 <root>/.aidog/skills 下的技能（只读，带 Source）。
+// 调用方必须已确认项目可信；未信任项目不应调用。
+func ProjectDiscoveredSkills(root string) []SkillConfig {
+	if strings.TrimSpace(root) == "" {
+		return nil
+	}
+	list, warnings := skills.Discover(skills.ProjectDir(root))
+	for _, w := range warnings {
+		slog.Warn("项目技能目录", "root", root, "warning", w)
+	}
+	return skillConfigsFromDiscovered(list, SkillSourceProjectDir)
 }
 
 // ActiveModel 返回当前激活的模型配置（已填充所属供应商的连接信息）。

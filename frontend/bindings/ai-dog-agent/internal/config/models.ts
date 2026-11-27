@@ -260,4 +260,9 @@ export interface SkillConfig {
     "description": string;
     "prompt": string;
     "enabled": boolean;
+
+    /**
+     * Source 运行时来源标记，不落盘：空=YAML 配置，user-dir/project-dir=目录扫描（只读）。
+     */
+    "source"?: string;
 }

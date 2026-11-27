@@ -67,16 +67,16 @@ func TestCatalog_WriteRequiresApproval(t *testing.T) {
 	}
 }
 
-// TestCatalog_ExplicitExecTools 执行类工具按需构建（go_* / run_shell）。
+// TestCatalog_ExplicitExecTools 执行类工具按需构建（devtools / run_shell）。
 func TestCatalog_ExplicitExecTools(t *testing.T) {
 	ws := newCatalogWS(t)
 	list, err := Catalog(context.Background(), ws, CatalogDeps{Whitelist: []string{"go"}},
-		[]string{ToolGoTest, ToolGoVet, ToolGoBuild, ToolRunShell})
+		[]string{ToolDevTreeDir, ToolRunShell})
 	if err != nil {
 		t.Fatalf("Catalog(exec): %v", err)
 	}
 	names := catalogToolNames(t, list)
-	want := []string{ToolGoTest, ToolGoVet, ToolGoBuild, ToolRunShell}
+	want := []string{ToolDevTreeDir, ToolRunShell}
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Fatalf("执行工具集合不符: %v", names)
 	}
@@ -91,5 +91,29 @@ func TestCatalog_UnknownTool(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), ToolReadFile) {
 		t.Fatalf("错误信息应列出可用工具: %v", err)
+	}
+}
+
+// TestToolOptionsCoverKnownTools 工具目录覆盖名录中的每个工具，且描述/分组完整。
+func TestToolOptionsCoverKnownTools(t *testing.T) {
+	opts := ToolOptions()
+	byName := make(map[string]ToolOption, len(opts))
+	for _, o := range opts {
+		if o.Description == "" || o.Group == "" {
+			t.Fatalf("工具目录项缺少描述或分组: %+v", o)
+		}
+		if _, dup := byName[o.Name]; dup {
+			t.Fatalf("工具目录项重复: %s", o.Name)
+		}
+		byName[o.Name] = o
+	}
+	names := KnownToolNames()
+	if len(opts) != len(names) {
+		t.Fatalf("工具目录数量与 KnownToolNames 不一致: %d vs %d", len(opts), len(names))
+	}
+	for _, n := range names {
+		if _, ok := byName[n]; !ok {
+			t.Fatalf("工具 %s 缺少目录项", n)
+		}
 	}
 }

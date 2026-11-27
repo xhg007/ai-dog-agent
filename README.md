@@ -6,7 +6,7 @@
 - **Agent 内核**：Eino（ADK 多 Agent 编排 / Graph 工作流）
 - **模型**：OpenAI 兼容协议自填（DeepSeek / Qwen / GLM / OpenAI 通用）
 - **工具协议**：MCP Go SDK（stdio / HTTP / SSE）
-- **语言无关**：任何语言/构建系统的项目都可使用；Go 为首个一等支持（go_test/go_vet/go_build 与 Go 符号索引）。非 Go 项目的构建/测试命令需加入 Shell 白名单（或逐次审批）
+- **语言无关**：任何语言/构建系统的项目都可使用；Go 为首个一等支持（devtools 的 Go 文档/概览/检查工具与 Go 符号索引）。非 Go 项目的构建/测试命令需加入 Shell 白名单（或逐次审批）
 - **需求文档**：见 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)
 
 ## 架构要点
@@ -15,11 +15,14 @@
 - **子 Agent**：配置随项目走（workspace 内 `.aidog/agents/*.yml`），独立上下文 / skill / MCP / function call / 模型；空工具默认只读。
 - **执行上限**：步骤、Token、时间、工具次数、预算、重试六项上限，由 Agent Runtime 统一计数并以结构化原因终止。
 - **项目级配置**：`.aidog/main.yml`（主 Agent 覆盖与项目 `agent_id`）、`mcp_servers.yml`、`skills.yml` 与全局配置在运行时合并，不写回全局。
+- **Skill 目录**：自动发现 `~/.agents/skills/<name>/SKILL.md` 与 `<项目>/.aidog/skills/<name>/SKILL.md`（项目目录需信任）；frontmatter 支持 `name` / `description` / `enabled`，正文作为指令；目录来源在设置页只读展示，不写回 YAML。
 - **后台 Meta Agent**：专职优化与创造子 Agent 配置（阶段 D，未实现）。
 - **上下文前缀稳定**：系统提示词静态前缀在前、动态内容追加在后，保证提示词缓存命中。
 - **会话持久化**：会话元数据与消息历史按会话落盘 `%AppData%/ai-dog-agent/sessions/*.json`，关闭软件后线程列表与对话记录可恢复，并在后续轮次回放历史。
 - **配置**：设置页提供模型（OpenAI 兼容）、Skills、MCP Server 的可视化编辑；「项目设置」tab 统一编辑项目级子 Agent（`.aidog/agents/*.yml`，含预算与压缩）、主 Agent 覆盖、项目专属 MCP/Skill 与 `.aidog` 信任确认；启用项追加到主 Agent 动态上下文。
+- **模型预设**：设置页「添加预设」内置 DeepSeek / 通义千问 / 智谱 GLM / Kimi / 火山方舟 / 硅基流动 / OpenAI 的官方 Base URL 与候选模型（2026-11-27 按官方文档核对），添加后只需填写 API Key；模型 ID 仍可用「检测模型」刷新。
 - **代码检索**：tree-sitter 多语言符号索引（Go / TypeScript / TSX / JavaScript / Python / Rust / Java / C / C++ / C# / Kotlin / Swift / Ruby / PHP / Bash）；`search_code` 命中附带所属符号，新增 `search_symbols` 工具；按文件 mtime 增量刷新。
+- **devtools**：移植自 [go-dev-mcp](https://github.com/fpt/go-dev-mcp) 的 14 个只读工具（Go/Rust/Python 文档查询、目录树、文件检索、Markdown 标题、Go 包概览与代码检查）；配置中写 `tools: ["devtools"]` 一次启用整组，主 Agent 默认启用。
 - **Markdown**：助手回复支持 GFM 表格、代码块、列表（remark-gfm）。
 
 ## 开发
@@ -39,6 +42,17 @@ DuckDB 使用**动态库模式**（`-tags=duckdb_use_lib`），以便加载 vss 
 .\run-dev.ps1        # Windows 开发
 .\build-windows.ps1  # Windows 构建
 ```
+
+更换应用图标（支持多套 logo）：
+
+```powershell
+.\convert-logo.ps1 -Svg logo.svg
+```
+
+脚本会把 SVG 渲染为 `build/appicon.png`，再通过 wails3 CLI 生成
+`build/windows/icon.ico`、`build/darwin/icons.icns` 与 `wails_windows_amd64.syso`，
+并同步 `frontend/public/logo.svg`（应用内 logo 与 favicon）；旧图标自动备份到
+`.icon-backups/`，可用 `-Svg` 指定其他 SVG、`-NoBackup` 跳过备份。
 
 ```bash
 ./run-dev.sh         # Linux/macOS 开发

@@ -26,9 +26,6 @@ const (
 	ToolGitStatus     = "git_status"
 	ToolWriteFile     = "write_file"
 	ToolEditFile      = "edit_file"
-	ToolGoTest        = "go_test"
-	ToolGoVet         = "go_vet"
-	ToolGoBuild       = "go_build"
 	ToolRunShell      = "run_shell"
 )
 
@@ -41,8 +38,97 @@ var DefaultReadOnlyTools = []string{
 func KnownToolNames() []string {
 	return []string{
 		ToolReadFile, ToolListFiles, ToolSearchCode, ToolSearchSymbols, ToolGitDiff, ToolGitStatus,
-		ToolWriteFile, ToolEditFile, ToolGoTest, ToolGoVet, ToolGoBuild, ToolRunShell,
+		ToolWriteFile, ToolEditFile, ToolRunShell,
+		ToolDevSearchGoDoc, ToolDevReadGoDoc, ToolDevSearchWithinGoDoc,
+		ToolDevSearchRustDoc, ToolDevReadRustDoc, ToolDevSearchWithinRustDoc,
+		ToolDevSearchPyDoc, ToolDevReadPyDoc, ToolDevSearchWithinPyDoc,
+		ToolDevTreeDir, ToolDevSearchLocalFiles, ToolDevScanMarkdown,
+		ToolDevOutlineGoPackage, ToolDevValidateGoCode,
 	}
+}
+
+// ToolOption 工具目录项：供设置页多选与 agent-smith 参考。
+type ToolOption struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Group       string `json:"group"` // readonly / write / exec / devtools
+}
+
+// 工具分组（配置页按组展示）。
+const (
+	ToolGroupReadOnly = "readonly"
+	ToolGroupWrite    = "write"
+	ToolGroupExec     = "exec"
+)
+
+var toolOptions = []ToolOption{
+	// 只读
+	{ToolReadFile, "读取 workspace 内文本文件（offset/limit 分页）", ToolGroupReadOnly},
+	{ToolListFiles, "列出目录内容（可递归）", ToolGroupReadOnly},
+	{ToolSearchCode, "按文本/正则检索代码，命中带所属符号", ToolGroupReadOnly},
+	{ToolSearchSymbols, "跨语言检索代码符号（函数/类型/类等）", ToolGroupReadOnly},
+	{ToolGitDiff, "查看相对 HEAD 的未提交变更", ToolGroupReadOnly},
+	{ToolGitStatus, "查看 git 状态（porcelain）", ToolGroupReadOnly},
+	// 写入（需审批 + 自动备份）
+	{ToolWriteFile, "写入文件（需用户审批，自动备份）", ToolGroupWrite},
+	{ToolEditFile, "精确替换文件片段（需用户审批，自动备份）", ToolGroupWrite},
+	// 执行
+	{ToolRunShell, "执行 Shell 命令（白名单内免审批，白名单外需审批）", ToolGroupExec},
+	// devtools 文档查询
+	{ToolDevSearchGoDoc, "在 pkg.go.dev 搜索 Go 包", ToolGroupDevTools},
+	{ToolDevReadGoDoc, "分页读取 pkg.go.dev 上的 Go 包文档", ToolGroupDevTools},
+	{ToolDevSearchWithinGoDoc, "在指定 Go 包文档内检索关键词", ToolGroupDevTools},
+	{ToolDevSearchRustDoc, "在 docs.rs 搜索 Rust crate", ToolGroupDevTools},
+	{ToolDevReadRustDoc, "分页读取 docs.rs 上的 crate 文档", ToolGroupDevTools},
+	{ToolDevSearchWithinRustDoc, "在指定 crate 文档内检索关键词", ToolGroupDevTools},
+	{ToolDevSearchPyDoc, "在 docs.python.org 搜索标准库模块", ToolGroupDevTools},
+	{ToolDevReadPyDoc, "分页读取 Python 模块文档", ToolGroupDevTools},
+	{ToolDevSearchWithinPyDoc, "在指定 Python 模块文档内检索关键词", ToolGroupDevTools},
+	// devtools 本地分析
+	{ToolDevTreeDir, "输出目录树（连接线风格）", ToolGroupDevTools},
+	{ToolDevSearchLocalFiles, "按扩展名检索文件内容", ToolGroupDevTools},
+	{ToolDevScanMarkdown, "扫描 Markdown 标题与行号", ToolGroupDevTools},
+	{ToolDevOutlineGoPackage, "Go 包概览：依赖、导出声明、调用图", ToolGroupDevTools},
+	{ToolDevValidateGoCode, "Go 静态检查：vet/build/gofmt/mod tidy", ToolGroupDevTools},
+}
+
+// ToolOptions 返回工具目录副本（名称、用途、分组）。
+func ToolOptions() []ToolOption {
+	return append([]ToolOption(nil), toolOptions...)
+}
+
+// KnownToolGroups 返回可用的工具组名。配置里写组名可一次启用整组。
+func KnownToolGroups() []string { return []string{ToolGroupDevTools} }
+
+// devToolNameSet devtools 工具名集合（组名展开与按需构建共用）。
+var devToolNameSet = func() map[string]bool {
+	m := make(map[string]bool, len(DevDocToolNames)+len(DevLocalToolNames))
+	for _, n := range DevDocToolNames {
+		m[n] = true
+	}
+	for _, n := range DevLocalToolNames {
+		m[n] = true
+	}
+	return m
+}()
+
+// ExpandToolGroups 把组名展开为具体工具名；非组名原样保留。
+// 未知名称最终由 Catalog 以「未知工具名」报错，避免配置拼写错误静默失效。
+func ExpandToolGroups(names []string) []string {
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		n = strings.TrimSpace(n)
+		if n == "" {
+			continue
+		}
+		if n == ToolGroupDevTools {
+			out = append(out, DevDocToolNames...)
+			out = append(out, DevLocalToolNames...)
+			continue
+		}
+		out = append(out, n)
+	}
+	return out
 }
 
 // CatalogDeps 按名构建工具的依赖项。
@@ -55,11 +141,12 @@ type CatalogDeps struct {
 
 // Catalog 按名称构建工具集：
 //   - names 为空 → DefaultReadOnlyTools（只读）；
+//   - 支持组名 "devtools"，展开为 14 个移植工具；
 //   - 未知名称返回错误（列出可用工具）；
 //   - write_file/edit_file 需要审批管理器；
 //   - go_* 仅适用于 Go 项目，由调用方按需声明。
 func Catalog(ctx context.Context, ws *workspace.Manager, deps CatalogDeps, names []string) ([]tool.BaseTool, error) {
-	want := names
+	want := ExpandToolGroups(names)
 	if len(want) == 0 {
 		want = DefaultReadOnlyTools
 	}
@@ -97,8 +184,15 @@ func Catalog(ctx context.Context, ws *workspace.Manager, deps CatalogDeps, names
 			return nil, err
 		}
 	}
-	if seen[ToolGoTest] || seen[ToolGoVet] || seen[ToolGoBuild] {
-		if err := add(GoToolset(ws)); err != nil {
+	needsDev := false
+	for _, n := range ordered {
+		if devToolNameSet[n] {
+			needsDev = true
+			break
+		}
+	}
+	if needsDev {
+		if err := add(DevToolset(ws)); err != nil {
 			return nil, err
 		}
 	}

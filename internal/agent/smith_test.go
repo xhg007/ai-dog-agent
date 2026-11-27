@@ -1,9 +1,11 @@
 package agent
 
 import (
+	"strings"
 	"testing"
 
 	"ai-dog-agent/internal/config"
+	"ai-dog-agent/internal/tools"
 )
 
 func newSmithTestConfig(t *testing.T) *config.Manager {
@@ -108,5 +110,47 @@ func TestParseAndValidateErrors(t *testing.T) {
 		if _, err := s.parseAndValidate(testSmithInput(), c.raw); err == nil {
 			t.Fatalf("%s: 应校验失败", c.name)
 		}
+	}
+}
+
+// TestBuildSmithPromptIncludesCatalogs 工具目录、Skill 指令摘要与 MCP 类型进入 smith 提示词。
+func TestBuildSmithPromptIncludesCatalogs(t *testing.T) {
+	in := &SmithInput{
+		Tools: []tools.ToolOption{
+			{Name: "dev_validate_go_code", Description: "Go 静态检查", Group: tools.ToolGroupDevTools},
+		},
+		Models: []config.ModelConfig{{ID: "main", Name: "Main", Model: "m"}},
+		Skills: []config.SkillConfig{
+			{ID: "s1", Name: "review", Description: "审查", Prompt: "检查错误处理与并发安全", Enabled: true},
+		},
+		MCPServers: []config.MCPServerConfig{
+			{ID: "m1", Name: "fs", Command: "npx", Enabled: true},
+		},
+	}
+	system, user, err := buildSmithPrompt(in)
+	if err != nil {
+		t.Fatalf("buildSmithPrompt: %v", err)
+	}
+	if !strings.Contains(system, tools.ToolGroupDevTools) {
+		t.Fatalf("系统提示应说明 devtools 组: %s", system)
+	}
+	for _, want := range []string{
+		"dev_validate_go_code [devtools]：Go 静态检查",
+		"main / Main / m",
+		"指令摘要：检查错误处理与并发安全",
+		"fs（stdio，enabled=true）",
+	} {
+		if !strings.Contains(user, want) {
+			t.Fatalf("用户提示缺少 %q:\n%s", want, user)
+		}
+	}
+}
+
+// TestParseAndValidateDevtoolsGroup smith 可直接引用 devtools 组。
+func TestParseAndValidateDevtoolsGroup(t *testing.T) {
+	s := &Smith{cfg: newSmithTestConfig(t)}
+	raw := `{"action":"create","name":"x","spec":{"name":"x","system_prompt":"x","tools":["devtools"]}}`
+	if _, err := s.parseAndValidate(&SmithInput{}, raw); err != nil {
+		t.Fatalf("devtools 组应通过校验: %v", err)
 	}
 }

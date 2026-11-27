@@ -135,13 +135,13 @@ func TestObsHandler_ToolCheckpoints(t *testing.T) {
 		SessionID: "s1", TaskID: taskID, Snapshot: `[{"role":"user","content":"hi"}]`,
 		AgentID: "agent-w",
 	})
-	tinfo := &callbacks.RunInfo{Name: "go_test", Type: "GoTool", Component: components.ComponentOfTool}
+	tinfo := &callbacks.RunInfo{Name: "dev_validate_go_code", Type: "GoTool", Component: components.ComponentOfTool}
 
 	// before
 	h.OnStart(ctx, tinfo, &tool.CallbackInput{ArgumentsInJSON: `{"dir":"internal"}`})
 	ev := waitEventCb(t, ch, eventbus.EvToolCall)
 	tc, ok := ev.Data.(eventbus.ToolCallData)
-	if !ok || tc.Tool != "go_test" || tc.AgentID != "agent-w" || tc.Args != `{"dir":"internal"}` {
+	if !ok || tc.Tool != "dev_validate_go_code" || tc.AgentID != "agent-w" || tc.Args != `{"dir":"internal"}` {
 		t.Fatalf("tool_call 事件不符: %+v", ev.Data)
 	}
 
@@ -158,7 +158,7 @@ func TestObsHandler_ToolCheckpoints(t *testing.T) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	if last == nil || last.Phase != "after" || last.ToolName != "go_test" || last.ToolResult != "ok 0.5s" {
+	if last == nil || last.Phase != "after" || last.ToolName != "dev_validate_go_code" || last.ToolResult != "ok 0.5s" {
 		t.Fatalf("after checkpoint 不符: %+v", last)
 	}
 }

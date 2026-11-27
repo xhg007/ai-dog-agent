@@ -180,12 +180,11 @@ body {
 .brand-logo {
   width: 28px; height: 28px;
   border-radius: 8px;
-  background: var(--text);
-  color: var(--bg-canvas);
-  display: flex; align-items: center; justify-content: center;
-  font-weight: 700; font-size: 11px;
+  overflow: hidden;
+  background: #0B0F1E;
   flex-shrink: 0;
 }
+.brand-logo img { width: 100%; height: 100%; display: block; }
 
 .brand-name { font-weight: 600; font-size: 13px; line-height: 1.2; }
 .brand-name small { display: block; font-weight: 400; font-size: 11px; color: var(--text-faint); }
@@ -1434,6 +1433,84 @@ body.resizing {
   padding-top: 4px;
 }
 .model-row.active .meta { color: var(--text); font-weight: 500; }
+
+/* ============ Skill 指令内容折叠 ============ */
+.skill-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.skill-prompt-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+}
+.skill-prompt-head .hint {
+  margin: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+
+/* ============ 多选（Agent 配置页 tools / skills / mcp_servers） ============ */
+.multiselect {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.multiselect-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 22px;
+}
+.multiselect-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #1b1b1b;
+  border: 1px solid #262626;
+  font-size: 11px;
+  color: var(--text);
+}
+.multiselect-tag button {
+  display: inline-flex;
+  color: var(--text-faint);
+}
+.multiselect-tag button:hover { color: var(--text); }
+.multiselect-input { flex: 1; min-width: 0; }
+.multiselect-panel {
+  border: 1px solid #262626;
+  border-radius: 6px;
+  padding: 10px;
+  max-height: 260px;
+  overflow: auto;
+  background: rgba(255, 255, 255, 0.01);
+}
+.multiselect-group { margin-top: 8px; }
+.multiselect-group-title {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 4px;
+}
+.multiselect-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 11px;
+  cursor: pointer;
+  color: var(--text);
+}
+.multiselect-item input { accent-color: #888; }
+.multiselect-item-name { font-weight: 500; }
+.multiselect-item-hint { flex: 1; margin: 0; }
 
 /* ============ 毛玻璃浮层（弹窗 / 下拉 / Tooltip） ============ */
 [data-slot="dialog-content"] {

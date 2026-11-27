@@ -91,6 +91,8 @@ func SaveProject(root string, pc ProjectConfig) error {
 	if strings.TrimSpace(root) == "" {
 		return errors.New("未设置工作区，无法保存项目配置")
 	}
+	// 目录扫描的 Skill 是只读来源，写盘前剔除，避免前端全量回写污染 skills.yml。
+	pc.Skills = FilterPersistedSkills(pc.Skills)
 	if err := validateConfig(Config{MCPServers: pc.MCPServers, Skills: pc.Skills}); err != nil {
 		return err
 	}

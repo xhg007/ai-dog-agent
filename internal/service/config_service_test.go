@@ -46,3 +46,27 @@ func TestSaveConfigPreservesWorkspaceAndTrust(t *testing.T) {
 		t.Fatalf("模型未保存: %+v", got.Models)
 	}
 }
+
+// TestGetConfigIncludesToolCatalog 设置页可从 GetConfig 获取工具目录。
+func TestGetConfigIncludesToolCatalog(t *testing.T) {
+	mgr, err := config.NewManagerAt(t.TempDir())
+	if err != nil {
+		t.Fatalf("创建配置: %v", err)
+	}
+	mgr.SetUserSkillsDir(t.TempDir()) // 隔离真实 ~/.agents/skills
+	svc := NewConfigService(mgr, workspace.New())
+	cfg := svc.GetConfig()
+	if len(cfg.ToolCatalog) == 0 {
+		t.Fatal("ToolCatalog 不应为空")
+	}
+	found := false
+	for _, opt := range cfg.ToolCatalog {
+		if opt.Name == "dev_validate_go_code" && opt.Description != "" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("工具目录缺少 dev_validate_go_code: %+v", cfg.ToolCatalog)
+	}
+}

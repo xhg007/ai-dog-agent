@@ -63,7 +63,7 @@ func ShellRun(ctx context.Context, ws *workspace.Manager, whitelist []string, ap
 }
 
 // runCommand 执行内核：并发限制、超时、输出截断。
-// 调用方负责白名单判定与审批（ShellRun 分词后调用；GoToolset 直传参数数组，
+// 调用方负责白名单判定与审批（ShellRun 分词后调用；dev_validate_go_code 直传参数数组，
 // 规避含空格路径的字符串分词问题）。
 // 返回值：命令成功或"正常失败"（非零退出码，如编译/测试失败）时 err 为 nil，
 // exitCode 区分；启动失败、超时或 ctx 取消时 err 非 nil 且 exitCode 为 -1。

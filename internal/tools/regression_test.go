@@ -6,7 +6,6 @@ package tools
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -236,42 +235,4 @@ func TestWriteToolsetNilApprover(t *testing.T) {
 	t.Fatal("未找到 write_file 工具")
 }
 
-// go_build 不应在 workspace 根留下可执行文件（产物应写入临时目录）。
-func TestGoBuildDoesNotPolluteWorkspace(t *testing.T) {
-	if _, err := exec.LookPath("go"); err != nil {
-		t.Skip("go 未安装")
-	}
-	ws := setupWS(t)
-	root := ws.Root()
-	writeFile(t, root, "go.mod", "module demo\n\ngo 1.21\n")
-	writeFile(t, root, "main.go", "package main\n\nfunc main() {}\n")
-
-	for _, tl := range GoToolset(ws) {
-		info, err := tl.Info(context.Background())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if info.Name != "go_build" {
-			continue
-		}
-		it, ok := tl.(tool.InvokableTool)
-		if !ok {
-			t.Fatal("go_build 不是 InvokableTool")
-		}
-		out, err := it.InvokableRun(context.Background(), `{}`)
-		if err != nil {
-			t.Fatalf("go_build 失败: %v\n%s", err, out)
-		}
-		entries, rerr := os.ReadDir(root)
-		if rerr != nil {
-			t.Fatal(rerr)
-		}
-		for _, e := range entries {
-			if !e.IsDir() && e.Name() != "go.mod" && e.Name() != "main.go" {
-				t.Fatalf("workspace 根出现构建产物: %s", e.Name())
-			}
-		}
-		return
-	}
-	t.Fatal("未找到 go_build 工具")
-}
+// go_build 已删除：构建/检查统一走 dev_validate_go_code 或 run_shell。

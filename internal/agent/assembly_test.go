@@ -186,7 +186,7 @@ func TestOrchestratorToolsIncludeExecTools(t *testing.T) {
 		}
 		names[info.Name] = true
 	}
-	for _, want := range []string{"run_shell", "go_test", "go_vet", "go_build", "write_file", "edit_file"} {
+	for _, want := range []string{"run_shell", "dev_search_godoc", "dev_tree_dir", "write_file", "edit_file"} {
 		if !names[want] {
 			t.Fatalf("主 Agent 工具集缺少 %s，实际: %v", want, names)
 		}

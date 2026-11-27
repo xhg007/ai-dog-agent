@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Plus, Save, ScanSearch, Trash2, Undo2, Wand2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Plus, Save, ScanSearch, Sparkles, Trash2, Undo2, Wand2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
@@ -14,6 +15,8 @@ import { ConfigService, TaskService } from '../../bindings/ai-dog-agent/internal
 import { ChatService } from '../../bindings/ai-dog-agent/internal/agent/index.js'
 import SkillEditor, { newSkill } from './SkillEditor'
 import MCPEditor, { newMCPServer } from './MCPEditor'
+import MultiSelect, { MultiSelectOption } from './MultiSelect'
+import { PROVIDER_PRESETS, ProviderPreset } from '../lib/modelPresets'
 import {
   applyGlass, loadGlass, saveGlass,
   DEFAULT_GLASS_ALPHA, DEFAULT_GLASS_BLUR,
@@ -38,6 +41,7 @@ interface ModelConfig {
   priceOut?: number
   timeoutSeconds?: number
   disableExtraFields?: boolean
+  contextWindow?: number
 }
 
 interface SkillConfig {
@@ -46,6 +50,8 @@ interface SkillConfig {
   description: string
   prompt: string
   enabled: boolean
+  // source 为目录扫描来源（user-dir / project-dir）：只读展示，保存时过滤。
+  source?: string
 }
 
 interface MCPServerConfig {
@@ -90,6 +96,14 @@ interface AppConfig {
   mcpServers: MCPServerConfig[]
   shellWhitelist: string[]
   agentSmithAuto?: boolean
+  // 工具目录：由后端 GetConfig 填充，供 Agent 配置页多选（不落盘）。
+  toolCatalog?: ToolOption[]
+}
+
+interface ToolOption {
+  name: string
+  description?: string
+  group?: string
 }
 
 type Tab = 'models' | 'skills' | 'mcp' | 'project' | 'appearance' | 'security' | 'usage'
@@ -98,7 +112,15 @@ interface DailyUsageRow { date: string; calls: number; inputTokens: number; outp
 
 const emptyAppConfig: AppConfig = {
   providers: [], models: [], activeModelId: '', skills: [], mcpServers: [], shellWhitelist: [],
+  toolCatalog: [],
 }
+
+// splitList 把 Agent 配置里的逗号分隔字符串拆成数组（兼容空串与多余空格）。
+const splitList = (v: string) => (v ?? '').split(',').map(s => s.trim()).filter(Boolean)
+
+// modelLabel 模型下拉的展示名：name 与 model 相同时只显示一次。
+const modelLabel = (m: ModelConfig) =>
+  !m.name || m.name === m.model ? m.model : `${m.name} · ${m.model}`
 
 function fromAgentSpec(s: any): AgentSpec {
   return {
@@ -163,6 +185,57 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
     selected: Set<string>
   } | null>(null)
 
+  // 预设供应商对话框：选择供应商与候选模型，一键创建 Provider + Model。
+  const [presetOpen, setPresetOpen] = useState(false)
+  const [presetId, setPresetId] = useState(PROVIDER_PRESETS[0].id)
+  const [presetModels, setPresetModels] = useState<Set<string>>(() => new Set())
+
+  // Agent 配置页的可选项：工具目录来自 GetConfig，Skill/MCP 合并全局 + 项目。
+  const toolOptions = useMemo<MultiSelectOption[]>(() => {
+    const groups: Record<string, string> = {
+      readonly: '只读', write: '写入（需审批）', exec: '执行', devtools: 'devtools',
+    }
+    return (cfg.toolCatalog ?? []).map(t => ({
+      value: t.name,
+      label: t.name,
+      hint: t.description,
+      group: groups[t.group ?? ''] ?? t.group ?? '其他',
+    }))
+  }, [cfg.toolCatalog])
+
+  const skillOptions = useMemo<MultiSelectOption[]>(() => {
+    const map = new Map<string, MultiSelectOption>()
+    for (const s of [...(cfg.skills ?? []), ...(projectCfg.skills ?? [])]) {
+      const v = s.name || s.id
+      if (!v) continue
+      const hint = [s.description, s.source ? '目录技能（只读）' : ''].filter(Boolean).join(' · ')
+      map.set(v, { value: v, label: s.name || s.id, hint })
+    }
+    return [...map.values()]
+  }, [cfg.skills, projectCfg.skills])
+
+  const mcpOptions = useMemo<MultiSelectOption[]>(() => {
+    const map = new Map<string, MultiSelectOption>()
+    for (const m of [...(cfg.mcpServers ?? []), ...(projectCfg.mcpServers ?? [])]) {
+      const v = m.name || m.id
+      if (!v) continue
+      const kind = m.transport || (m.command ? 'stdio' : 'http')
+      map.set(v, {
+        value: v,
+        label: m.name || m.id,
+        hint: `${kind}${m.enabled === false ? ' · 未启用' : ''}`,
+      })
+    }
+    return [...map.values()]
+  }, [cfg.mcpServers, projectCfg.mcpServers])
+
+  // modelRef 把旧配置里的 Name/Model 规范化为模型 ID；无法匹配时保留原值。
+  const modelRef = (ref: string) => {
+    if (!ref) return '__default__'
+    const hit = (cfg.models ?? []).find(m => m.id === ref || m.name === ref || m.model === ref)
+    return hit ? hit.id : ref
+  }
+
   // 外观设置即时生效并持久化（不参与配置文件的保存流程）
   useEffect(() => {
     applyGlass(glassAlpha, glassBlur)
@@ -219,6 +292,7 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
         env: m.env ?? '',
       })),
       agentSmithAuto: c.agentSmithAuto ?? false,
+      toolCatalog: c.toolCatalog ?? [],
     }))
     ConfigService.GetConfigDir().then(setDir)
     ConfigService.GetProjectAgentDir().then(setAgentDir)
@@ -238,6 +312,62 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
   const addProvider = () => patch({
     providers: [...cfg.providers, { id: crypto.randomUUID(), name: '新供应商', baseURL: '', apiKey: '' }],
   })
+
+  // ---------- 预设供应商 ----------
+  const preset: ProviderPreset = PROVIDER_PRESETS.find(p => p.id === presetId) ?? PROVIDER_PRESETS[0]
+
+  // pickPresetModels 默认勾选推荐模型；没有推荐项时全选。
+  const pickPresetModels = (p: ProviderPreset) => {
+    const recommended = p.models.filter(m => m.recommended)
+    return new Set((recommended.length > 0 ? recommended : p.models).map(m => m.id))
+  }
+
+  const openPreset = () => {
+    const p = PROVIDER_PRESETS[0]
+    setPresetId(p.id)
+    setPresetModels(pickPresetModels(p))
+    setPresetOpen(true)
+  }
+
+  const changePreset = (id: string) => {
+    const p = PROVIDER_PRESETS.find(x => x.id === id) ?? PROVIDER_PRESETS[0]
+    setPresetId(p.id)
+    setPresetModels(pickPresetModels(p))
+  }
+
+  const togglePresetModel = (id: string) => {
+    setPresetModels(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const addPreset = () => {
+    const p = PROVIDER_PRESETS.find(x => x.id === presetId)
+    if (!p) return
+    const providerId = crypto.randomUUID()
+    const provider: ProviderConfig = {
+      id: providerId, name: p.name, baseURL: p.baseURL, apiKey: '',
+    }
+    const models: ModelConfig[] = p.models
+      .filter(m => presetModels.has(m.id))
+      .map(m => ({
+        id: crypto.randomUUID(),
+        providerId,
+        name: m.name,
+        model: m.id,
+        priceIn: 0,
+        priceOut: 0,
+        contextWindow: m.contextWindow ?? 0,
+      }))
+    patch({
+      providers: [...cfg.providers, provider],
+      models: [...cfg.models, ...models],
+    })
+    setPresetOpen(false)
+  }
 
   const updateProvider = (id: string, p: Partial<ProviderConfig>) =>
     patch({ providers: cfg.providers.map(x => x.id === id ? { ...x, ...p } : x) })
@@ -295,8 +425,12 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
     setNewWhitelistEntry('')
   }
 
+  const isDirSkill = (s: SkillConfig) => s.source === 'user-dir' || s.source === 'project-dir'
+
   const serialize = (c: AppConfig) => ({
     ...c,
+    // 目录来源 Skill 只读：不回写 config.yml（后端 Save 也会过滤，这里提前剔除）。
+    skills: (c.skills ?? []).filter(s => !isDirSkill(s)),
     mcpServers: c.mcpServers.map(m => ({
       ...m,
       args: m.args.split(',').map(s => s.trim()).filter(Boolean),
@@ -395,7 +529,10 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
     const main = projectCfg.main ?? {}
     const payload = {
       ...projectCfg,
-      skills: projectCfg.skills ?? [],
+      // 目录来源 Skill 只读：不回写 skills.yml（后端 SaveProject 也会过滤）。
+      skills: (projectCfg.skills ?? []).filter(
+        (s: any) => s.source !== 'user-dir' && s.source !== 'project-dir'
+      ),
       mcpServers: (projectCfg.mcpServers ?? []).map((m: any) => ({
         ...m,
         args: (m.args ?? '').split(',').map((s: string) => s.trim()).filter(Boolean),
@@ -539,13 +676,19 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
           <>
             <div className="settings-head">
               <h3>模型配置（OpenAI 兼容）</h3>
-              <Button variant="secondary" size="xs" onClick={addProvider}>
-                <Plus className="size-3.5" /> 添加供应商
-              </Button>
+              <div className="settings-section-actions">
+                <Button variant="secondary" size="xs" onClick={openPreset}>
+                  <Sparkles className="size-3.5" /> 添加预设
+                </Button>
+                <Button variant="secondary" size="xs" onClick={addProvider}>
+                  <Plus className="size-3.5" /> 添加供应商
+                </Button>
+              </div>
             </div>
             <p className="hint">
               一个供应商只需填写一次 Base URL / API Key，其下可挂多个模型；
-              「检测模型」会请求供应商的 /models 接口，勾选后批量添加。
+              「检测模型」会请求供应商的 /models 接口，勾选后批量添加。<br />
+              「添加预设」已按官方文档预填常用供应商的 Base URL 与最新候选模型（2026-11-27 核对），添加后填写 API Key 即可。
             </p>
             {cfg.providers.length === 0 && (
               <p className="hint">尚未配置供应商，点击右上角「添加供应商」。</p>
@@ -809,7 +952,8 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
               <p className="hint">
                 目录：{agentDir || '未设置工作区，请先在左侧「项目」选择目录'}<br />
                 每个 Agent 对应 .aidog/agents 下的一个 .yml 文件：agent_id（自动生成固化，唯一不变）/ name / description / system_prompt / model / tools / skills / mcp_servers / max_turns / budget / context。<br />
-                work agent 按此定义分派执行（独立上下文 / Skill / MCP 工具集）；保存后对当前会话下一轮生效。
+                work agent 按此定义分派执行（独立上下文 / Skill / MCP 工具集）；保存后对当前会话下一轮生效。<br />
+                工具 / Skill / MCP 可从已配置列表勾选，也可手动输入（回车添加）任意值。
               </p>
               {!agentDir && <p className="hint">设置工作区后即可添加项目级 Agent。</p>}
               <div className="form-grid" style={{ margin: '12px 0' }}>
@@ -838,17 +982,41 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
                       placeholder="你是代码审查专家，只读不改。"
                       onChange={e => updateAgent(i, { system_prompt: e.target.value })} />
                     <Label>模型覆盖</Label>
-                    <Input value={a.model} placeholder="留空则跟随当前模型"
-                      onChange={e => updateAgent(i, { model: e.target.value })} />
+                    <Select
+                      value={modelRef(a.model)}
+                      onValueChange={v => updateAgent(i, { model: v === '__default__' ? '' : v })}
+                    >
+                      <SelectTrigger size="sm" className="w-full">
+                        <SelectValue placeholder="跟随当前模型" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__default__">跟随当前模型</SelectItem>
+                        {(cfg.models ?? []).map(m => (
+                          <SelectItem key={m.id} value={m.id}>{modelLabel(m)}</SelectItem>
+                        ))}
+                        {a.model && modelRef(a.model) === a.model && (
+                          <SelectItem value={a.model}>{a.model}（当前配置）</SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
                     <Label>工具集</Label>
-                    <Input value={a.tools} placeholder="read_file, search_code"
-                      onChange={e => updateAgent(i, { tools: e.target.value })} />
+                    <MultiSelect
+                      value={splitList(a.tools)}
+                      options={toolOptions}
+                      onChange={v => updateAgent(i, { tools: v.join(', ') })}
+                    />
                     <Label>Skills</Label>
-                    <Input value={a.skills} placeholder="go-review"
-                      onChange={e => updateAgent(i, { skills: e.target.value })} />
+                    <MultiSelect
+                      value={splitList(a.skills)}
+                      options={skillOptions}
+                      onChange={v => updateAgent(i, { skills: v.join(', ') })}
+                    />
                     <Label>MCP Servers</Label>
-                    <Input value={a.mcp_servers} placeholder="local-fs"
-                      onChange={e => updateAgent(i, { mcp_servers: e.target.value })} />
+                    <MultiSelect
+                      value={splitList(a.mcp_servers)}
+                      options={mcpOptions}
+                      onChange={v => updateAgent(i, { mcp_servers: v.join(', ') })}
+                    />
                     <Label>最大轮数</Label>
                     <Input type="number" value={a.max_turns}
                       onChange={e => updateAgent(i, { max_turns: Number(e.target.value) })} />
@@ -942,8 +1110,6 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
               </div>
             {(() => {
               const main = projectCfg.main ?? {}
-              const listText = (v: any) => Array.isArray(v) ? v.join(', ') : ''
-              const parseList = (v: string) => v.split(',').map(s => s.trim())
               const patchMain = (p: any) => setProjectCfg((c: any) => ({
                 ...c, main: { ...(c.main ?? {}), ...p },
               }))
@@ -951,17 +1117,41 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
                 <>
                   <div className="form-grid">
                     <Label>模型覆盖</Label>
-                    <Input value={main.model ?? ''} placeholder="留空跟随全局激活模型"
-                      onChange={e => patchMain({ model: e.target.value })} />
+                    <Select
+                      value={modelRef(main.model ?? '')}
+                      onValueChange={v => patchMain({ model: v === '__default__' ? '' : v })}
+                    >
+                      <SelectTrigger size="sm" className="w-full">
+                        <SelectValue placeholder="跟随全局激活模型" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__default__">跟随全局激活模型</SelectItem>
+                        {(cfg.models ?? []).map(m => (
+                          <SelectItem key={m.id} value={m.id}>{modelLabel(m)}</SelectItem>
+                        ))}
+                        {main.model && modelRef(main.model) === main.model && (
+                          <SelectItem value={main.model}>{main.model}（当前配置）</SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
                     <Label>工具</Label>
-                    <Input value={listText(main.tools)} placeholder="read_file, dispatch_coder"
-                      onChange={e => patchMain({ tools: parseList(e.target.value) })} />
+                    <MultiSelect
+                      value={main.tools ?? []}
+                      options={toolOptions}
+                      onChange={v => patchMain({ tools: v })}
+                    />
                     <Label>Skills</Label>
-                    <Input value={listText(main.skills)} placeholder="全局或项目 Skill 名称"
-                      onChange={e => patchMain({ skills: parseList(e.target.value) })} />
+                    <MultiSelect
+                      value={main.skills ?? []}
+                      options={skillOptions}
+                      onChange={v => patchMain({ skills: v })}
+                    />
                     <Label>MCP Servers</Label>
-                    <Input value={listText(main.mcp_servers)} placeholder="全局或项目 MCP 名称"
-                      onChange={e => patchMain({ mcp_servers: parseList(e.target.value) })} />
+                    <MultiSelect
+                      value={main.mcp_servers ?? []}
+                      options={mcpOptions}
+                      onChange={v => patchMain({ mcp_servers: v })}
+                    />
                   </div>
                   <div className="settings-subhead">执行预算（0 = 默认值）</div>
                   <div className="form-grid">
@@ -1121,6 +1311,52 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
       </Tabs>
 
       {/* 供应商模型检测：勾选后批量添加 */}
+      {/* 预设供应商：Base URL 与候选模型来自官方文档，添加后填写 API Key 即可 */}
+      <Dialog open={presetOpen} onOpenChange={setPresetOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>添加预设供应商</DialogTitle>
+            <DialogDescription>
+              选择供应商与候选模型；添加后填写 API Key 并保存即可使用。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="form-grid">
+            <Label>供应商</Label>
+            <Select value={presetId} onValueChange={changePreset}>
+              <SelectTrigger size="sm" className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {PROVIDER_PRESETS.map(p => (
+                  <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Label>Base URL</Label>
+            <Input value={preset.baseURL} readOnly />
+          </div>
+          {preset.note && <p className="hint">{preset.note}</p>}
+          <div className="multiselect-panel" style={{ marginTop: 8 }}>
+            {preset.models.map(m => (
+              <label key={m.id} className="multiselect-item">
+                <input
+                  type="checkbox"
+                  checked={presetModels.has(m.id)}
+                  onChange={() => togglePresetModel(m.id)}
+                />
+                <span className="multiselect-item-name">{m.name}</span>
+                <span className="hint">{m.id}{m.note ? ` · ${m.note}` : ''}</span>
+              </label>
+            ))}
+          </div>
+          {preset.docsURL && <p className="hint">文档：{preset.docsURL}</p>}
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setPresetOpen(false)}>取消</Button>
+            <Button onClick={addPreset} disabled={presetModels.size === 0}>
+              添加 {presetModels.size} 个模型
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={!!detect} onOpenChange={v => { if (!v) setDetect(null) }}>
         <DialogContent>
           <DialogHeader>

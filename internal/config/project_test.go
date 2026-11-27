@@ -115,6 +115,8 @@ func TestManagerEffective(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewManagerAt: %v", err)
 	}
+	// 隔离真实 ~/.agents/skills，避免测试结果受本机技能目录影响。
+	m.userSkillsDir = t.TempDir()
 	global := Config{
 		Models:        []ModelConfig{{ID: "x", Name: "X", Model: "xm"}},
 		ActiveModelID: "x",

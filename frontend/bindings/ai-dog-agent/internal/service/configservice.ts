@@ -35,6 +35,8 @@ export function DetectProviderModels(providerID: string): $CancellablePromise<st
 /**
  * GetConfig 返回当前配置（含模型 / Skills / MCP Server）。
  * ShellWhitelist 为空时填充默认白名单，保证前端设置页展示生效值。
+ * 另附用户级目录技能（~/.agents/skills，Source=user-dir），仅供只读展示；
+ * 保存时由 config.Manager.Save 过滤，不会写回 config.yml。
  */
 export function GetConfig(): $CancellablePromise<config$0.Config> {
     return $Call.ByID(3004103843);
@@ -63,6 +65,8 @@ export function GetProjectAgents(): $CancellablePromise<agentspec$0.Spec[] | nul
 
 /**
  * GetProjectConfig 返回项目级配置（.aidog 目录；未设置工作区时返回空配置）。
+ * 项目已信任时附加 .aidog/skills 目录技能（Source=project-dir，只读展示）；
+ * 保存时由 config.SaveProject 过滤，不会写回 skills.yml。
  */
 export function GetProjectConfig(): $CancellablePromise<config$0.ProjectConfig> {
     return $Call.ByID(3489640804);
