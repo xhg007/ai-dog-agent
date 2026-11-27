@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, Save, Trash2, Undo2, Wand2 } from 'lucide-react'
+import { Plus, Save, ScanSearch, Trash2, Undo2, Wand2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -7,21 +7,32 @@ import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
 import { ConfigService, TaskService } from '../../bindings/ai-dog-agent/internal/service/index.js'
 import { ChatService } from '../../bindings/ai-dog-agent/internal/agent/index.js'
-import SkillEditor from './SkillEditor'
-import MCPEditor from './MCPEditor'
+import SkillEditor, { newSkill } from './SkillEditor'
+import MCPEditor, { newMCPServer } from './MCPEditor'
 import {
   applyGlass, loadGlass, saveGlass,
   DEFAULT_GLASS_ALPHA, DEFAULT_GLASS_BLUR,
   MIN_GLASS_ALPHA, MAX_GLASS_ALPHA, MIN_GLASS_BLUR, MAX_GLASS_BLUR,
 } from '../lib/glass'
 
-interface ModelConfig {
+interface ProviderConfig {
   id: string
   name: string
   baseURL: string
   apiKey: string
+}
+
+interface ModelConfig {
+  id: string
+  providerId?: string
+  name: string
+  baseURL?: string   // 运行时由所属供应商填充（不在前端编辑）
+  apiKey?: string    // 同上
   model: string
   priceIn?: number
   priceOut?: number
@@ -72,6 +83,7 @@ interface AgentSpec {
 }
 
 interface AppConfig {
+  providers: ProviderConfig[]
   models: ModelConfig[]
   activeModelId: string
   skills: SkillConfig[]
@@ -84,7 +96,9 @@ type Tab = 'models' | 'skills' | 'mcp' | 'project' | 'appearance' | 'security' |
 
 interface DailyUsageRow { date: string; calls: number; inputTokens: number; outputTokens: number; costTotal: number }
 
-const emptyAppConfig: AppConfig = { models: [], activeModelId: '', skills: [], mcpServers: [], shellWhitelist: [] }
+const emptyAppConfig: AppConfig = {
+  providers: [], models: [], activeModelId: '', skills: [], mcpServers: [], shellWhitelist: [],
+}
 
 function fromAgentSpec(s: any): AgentSpec {
   return {
@@ -139,6 +153,15 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
   const [projectMsg, setProjectMsg] = useState('')
   const [glassAlpha, setGlassAlpha] = useState(() => loadGlass().alpha)
   const [glassBlur, setGlassBlur] = useState(() => loadGlass().blur)
+  // 供应商模型检测对话框：检测结果 + 勾选项
+  const [detect, setDetect] = useState<{
+    providerId: string
+    providerName: string
+    loading: boolean
+    error: string
+    models: string[]
+    selected: Set<string>
+  } | null>(null)
 
   // 外观设置即时生效并持久化（不参与配置文件的保存流程）
   useEffect(() => {
@@ -180,6 +203,7 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
 
   useEffect(() => {
     ConfigService.GetConfig().then((c: any) => setCfg({
+      providers: c.providers ?? [],
       models: c.models ?? [],
       activeModelId: c.activeModelId ?? '',
       skills: c.skills ?? [],
@@ -208,14 +232,34 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
     setDirty(true)
   }
 
-  const updateModel = (i: number, p: Partial<ModelConfig>) =>
-    patch({ models: cfg.models.map((m, j) => j === i ? { ...m, ...p } : m) })
+  const updateModel = (id: string, p: Partial<ModelConfig>) =>
+    patch({ models: cfg.models.map(m => m.id === id ? { ...m, ...p } : m) })
 
-  const addModel = () => patch({
+  const addProvider = () => patch({
+    providers: [...cfg.providers, { id: crypto.randomUUID(), name: '新供应商', baseURL: '', apiKey: '' }],
+  })
+
+  const updateProvider = (id: string, p: Partial<ProviderConfig>) =>
+    patch({ providers: cfg.providers.map(x => x.id === id ? { ...x, ...p } : x) })
+
+  const removeProvider = (id: string) => {
+    const models = cfg.models.filter(m => m.providerId !== id)
+    patch({
+      providers: cfg.providers.filter(p => p.id !== id),
+      models,
+      activeModelId: models.some(m => m.id === cfg.activeModelId) ? cfg.activeModelId : '',
+    })
+  }
+
+  const addModelToProvider = (providerId: string) => patch({
     models: [...cfg.models, {
-      id: crypto.randomUUID(), name: '新模型', baseURL: '', apiKey: '', model: '',
-      priceIn: 0, priceOut: 0,
+      id: crypto.randomUUID(), providerId, name: '新模型', model: '', priceIn: 0, priceOut: 0,
     }],
+  })
+
+  const removeModel = (id: string) => patch({
+    models: cfg.models.filter(m => m.id !== id),
+    activeModelId: cfg.activeModelId === id ? '' : cfg.activeModelId,
   })
 
   const updateAgent = (i: number, p: Partial<AgentSpec>) => {
@@ -223,6 +267,24 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
     setSaved(false)
     setDirty(true)
   }
+
+  const addAgent = () => setAgents(a => [...a, {
+    agent_id: '', name: '', description: '', system_prompt: '', model: '',
+    tools: '', skills: '', mcp_servers: '', max_turns: 0,
+    budget: {}, context: {},
+  }])
+
+  const addProjectSkill = () => setProjectCfg((c: any) => ({
+    ...c, skills: [...(c.skills ?? []), newSkill()],
+  }))
+
+  const addProjectMCPServer = () => setProjectCfg((c: any) => ({
+    ...c, mcpServers: [...(c.mcpServers ?? []), newMCPServer()],
+  }))
+
+  const addGlobalSkill = () => patch({ skills: [...cfg.skills, newSkill()] })
+
+  const addGlobalMCPServer = () => patch({ mcpServers: [...cfg.mcpServers, newMCPServer()] })
 
   const [newWhitelistEntry, setNewWhitelistEntry] = useState('')
 
@@ -241,7 +303,7 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
     })),
   })
 
-  const saveConfig = async () => {
+  const saveConfig = async (): Promise<boolean> => {
     setError('')
     try {
       // activeModelId 由 SetActiveModel 单独维护：保存前重新读一次当前值，
@@ -253,9 +315,60 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
       }) as any)
       setSaved(true)
       setDirty(false)
+      return true
     } catch (e) {
       setError(String(e))
+      return false
     }
+  }
+
+  // 检测供应商可用模型：检测接口从已保存配置读取 BaseURL/APIKey，
+  // 因此先落盘当前编辑，再列出尚未添加的模型供勾选。
+  const openDetect = async (p: ProviderConfig) => {
+    setError('')
+    if (!(await saveConfig())) return
+    const name = p.name || p.baseURL
+    setDetect({ providerId: p.id, providerName: name, loading: true, error: '', models: [], selected: new Set() })
+    try {
+      const list = (await ConfigService.DetectProviderModels(p.id)) as string[] | null
+      const existing = new Set(cfg.models.filter(m => m.providerId === p.id).map(m => m.model))
+      const fresh = (list ?? []).filter(id => !existing.has(id))
+      setDetect({
+        providerId: p.id,
+        providerName: name,
+        loading: false,
+        error: fresh.length === 0 ? '该供应商的模型已全部添加。' : '',
+        models: fresh,
+        selected: new Set(fresh),
+      })
+    } catch (e: any) {
+      setDetect(prev => prev ? {
+        ...prev,
+        loading: false,
+        error: typeof e === 'string' ? e : e?.message ?? String(e),
+      } : null)
+    }
+  }
+
+  const toggleDetectModel = (id: string) => setDetect(prev => {
+    if (!prev) return prev
+    const selected = new Set(prev.selected)
+    if (selected.has(id)) selected.delete(id)
+    else selected.add(id)
+    return { ...prev, selected }
+  })
+
+  const confirmDetect = () => {
+    if (!detect || detect.selected.size === 0) {
+      setDetect(null)
+      return
+    }
+    const added: ModelConfig[] = [...detect.selected].map(id => ({
+      id: crypto.randomUUID(), providerId: detect.providerId, name: id, model: id,
+      priceIn: 0, priceOut: 0,
+    }))
+    patch({ models: [...cfg.models, ...added] })
+    setDetect(null)
   }
 
   // 点击模型行立即设为当前（与 Composer 的切换语义一致）；字段编辑仍需保存
@@ -424,93 +537,199 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
             <div className="card">
         {tab === 'models' && (
           <>
-            <h3>模型配置（OpenAI 兼容）</h3>
-            {cfg.models.length === 0 && <p className="hint">尚未配置模型，请点击下方「添加模型」。</p>}
-            {cfg.models.map((m, i) => (
-              <div
-                key={m.id}
-                className={`model-row${cfg.activeModelId === m.id ? ' active' : ''}`}
-                onClick={() => activateModel(m.id)}
-              >
-                <div style={{ flex: 1 }}>
-                  <div className="form-grid">
-                    <Label>显示名</Label>
-                    <Input value={m.name} onClick={e => e.stopPropagation()}
-                      onChange={e => updateModel(i, { name: e.target.value })} />
-                    <Label>Base URL</Label>
-                    <Input value={m.baseURL} placeholder="https://api.deepseek.com/v1"
-                      onClick={e => e.stopPropagation()}
-                      onChange={e => updateModel(i, { baseURL: e.target.value })} />
-                    <Label>Model ID</Label>
-                    <Input value={m.model} placeholder="deepseek-chat"
-                      onClick={e => e.stopPropagation()}
-                      onChange={e => updateModel(i, { model: e.target.value })} />
-                    <Label>API Key</Label>
-                    <Input type="password" value={m.apiKey}
-                      onClick={e => e.stopPropagation()}
-                      onChange={e => updateModel(i, { apiKey: e.target.value })} />
-                    <Label>输入单价/1M</Label>
-                    <Input type="number" value={m.priceIn}
-                      onClick={e => e.stopPropagation()}
-                      onChange={e => updateModel(i, { priceIn: Number(e.target.value) })} />
-                    <Label>输出单价/1M</Label>
-                    <Input type="number" value={m.priceOut}
-                      onClick={e => e.stopPropagation()}
-                      onChange={e => updateModel(i, { priceOut: Number(e.target.value) })} />
-                    <Label>超时（秒）</Label>
-                    <Input type="number" value={m.timeoutSeconds ?? 0}
-                      placeholder="0 = 默认 300"
-                      onClick={e => e.stopPropagation()}
-                      onChange={e => updateModel(i, { timeoutSeconds: Number(e.target.value) })} />
-                    <Label>发送 agent_id</Label>
-                    <Switch checked={!m.disableExtraFields}
-                      onCheckedChange={v => updateModel(i, { disableExtraFields: !v })} />
-                  </div>
-                  <div className="row-actions">
-                    <Button
-                      variant="destructive"
-                      size="icon-sm"
-                      title="删除模型"
-                      aria-label={`删除模型 ${m.name || m.model || m.id}`}
-                      onClick={e => {
-                        e.stopPropagation()
-                        patch({ models: cfg.models.filter(x => x.id !== m.id) })
-                      }}
-                    ><Trash2 /></Button>
-                  </div>
-                </div>
-                <div className="meta">{cfg.activeModelId === m.id ? '当前使用' : '点击立即设为当前'}</div>
-              </div>
-            ))}
-            <div className="row-actions">
-              <Button variant="secondary" size="sm" onClick={addModel}><Plus className="size-3.5" /> 添加模型</Button>
+            <div className="settings-head">
+              <h3>模型配置（OpenAI 兼容）</h3>
+              <Button variant="secondary" size="xs" onClick={addProvider}>
+                <Plus className="size-3.5" /> 添加供应商
+              </Button>
             </div>
+            <p className="hint">
+              一个供应商只需填写一次 Base URL / API Key，其下可挂多个模型；
+              「检测模型」会请求供应商的 /models 接口，勾选后批量添加。
+            </p>
+            {cfg.providers.length === 0 && (
+              <p className="hint">尚未配置供应商，点击右上角「添加供应商」。</p>
+            )}
+            {cfg.providers.map(p => {
+              const models = cfg.models.filter(m => m.providerId === p.id)
+              return (
+                <section key={p.id} className="settings-section">
+                  <div className="settings-section-head">
+                    <h4>{p.name || '未命名供应商'}</h4>
+                    <div className="settings-section-actions">
+                      <Button variant="secondary" size="xs" onClick={() => openDetect(p)}>
+                        <ScanSearch className="size-3.5" /> 检测模型
+                      </Button>
+                      <Button variant="secondary" size="xs" onClick={() => addModelToProvider(p.id)}>
+                        <Plus className="size-3.5" /> 添加模型
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="icon-xs"
+                        title="删除供应商（连同其下模型）"
+                        aria-label={`删除供应商 ${p.name || p.id}`}
+                        onClick={() => removeProvider(p.id)}
+                      ><Trash2 /></Button>
+                    </div>
+                  </div>
+                  <div className="form-grid">
+                    <Label>名称</Label>
+                    <Input value={p.name} placeholder="DeepSeek"
+                      onChange={e => updateProvider(p.id, { name: e.target.value })} />
+                    <Label>Base URL</Label>
+                    <Input value={p.baseURL} placeholder="https://api.deepseek.com/v1"
+                      onChange={e => updateProvider(p.id, { baseURL: e.target.value })} />
+                    <Label>API Key</Label>
+                    <Input type="password" value={p.apiKey} placeholder="sk-..."
+                      onChange={e => updateProvider(p.id, { apiKey: e.target.value })} />
+                  </div>
+                  {models.length === 0 && (
+                    <p className="hint">该供应商下暂无模型，点击右上角「添加模型」或「检测模型」。</p>
+                  )}
+                  {models.map(m => (
+                    <div
+                      key={m.id}
+                      className={`model-row${cfg.activeModelId === m.id ? ' active' : ''}`}
+                      onClick={() => activateModel(m.id)}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <div className="form-grid">
+                          <Label>显示名</Label>
+                          <Input value={m.name} onClick={e => e.stopPropagation()}
+                            onChange={e => updateModel(m.id, { name: e.target.value })} />
+                          <Label>Model ID</Label>
+                          <Input value={m.model} placeholder="deepseek-chat"
+                            onClick={e => e.stopPropagation()}
+                            onChange={e => updateModel(m.id, { model: e.target.value })} />
+                          <Label>输入单价/1M</Label>
+                          <Input type="number" value={m.priceIn}
+                            onClick={e => e.stopPropagation()}
+                            onChange={e => updateModel(m.id, { priceIn: Number(e.target.value) })} />
+                          <Label>输出单价/1M</Label>
+                          <Input type="number" value={m.priceOut}
+                            onClick={e => e.stopPropagation()}
+                            onChange={e => updateModel(m.id, { priceOut: Number(e.target.value) })} />
+                          <Label>超时（秒）</Label>
+                          <Input type="number" value={m.timeoutSeconds ?? 0}
+                            placeholder="0 = 默认 300"
+                            onClick={e => e.stopPropagation()}
+                            onChange={e => updateModel(m.id, { timeoutSeconds: Number(e.target.value) })} />
+                          <Label>发送 agent_id</Label>
+                          <Switch checked={!m.disableExtraFields}
+                            onCheckedChange={v => updateModel(m.id, { disableExtraFields: !v })} />
+                        </div>
+                        <div className="row-actions">
+                          <Button
+                            variant="destructive"
+                            size="icon-sm"
+                            title="删除模型"
+                            aria-label={`删除模型 ${m.name || m.model || m.id}`}
+                            onClick={e => { e.stopPropagation(); removeModel(m.id) }}
+                          ><Trash2 /></Button>
+                        </div>
+                      </div>
+                      <div className="meta">{cfg.activeModelId === m.id ? '当前使用' : '点击设为当前'}</div>
+                    </div>
+                  ))}
+                </section>
+              )
+            })}
+            {cfg.models.some(m => !m.providerId) && (
+              <section className="settings-section">
+                <div className="settings-section-head">
+                  <h4>未归属供应商的模型</h4>
+                </div>
+                <p className="hint">旧式独立模型（自带 Base URL / API Key），建议归入某个供应商。</p>
+                {cfg.models.filter(m => !m.providerId).map(m => (
+                  <div
+                    key={m.id}
+                    className={`model-row${cfg.activeModelId === m.id ? ' active' : ''}`}
+                    onClick={() => activateModel(m.id)}
+                  >
+                    <div style={{ flex: 1 }}>
+                      <div className="form-grid">
+                        <Label>显示名</Label>
+                        <Input value={m.name} onClick={e => e.stopPropagation()}
+                          onChange={e => updateModel(m.id, { name: e.target.value })} />
+                        <Label>Base URL</Label>
+                        <Input value={m.baseURL ?? ''} placeholder="https://api.deepseek.com/v1"
+                          onClick={e => e.stopPropagation()}
+                          onChange={e => updateModel(m.id, { baseURL: e.target.value })} />
+                        <Label>API Key</Label>
+                        <Input type="password" value={m.apiKey ?? ''}
+                          onClick={e => e.stopPropagation()}
+                          onChange={e => updateModel(m.id, { apiKey: e.target.value })} />
+                        <Label>Model ID</Label>
+                        <Input value={m.model} placeholder="deepseek-chat"
+                          onClick={e => e.stopPropagation()}
+                          onChange={e => updateModel(m.id, { model: e.target.value })} />
+                        <Label>输入单价/1M</Label>
+                        <Input type="number" value={m.priceIn}
+                          onClick={e => e.stopPropagation()}
+                          onChange={e => updateModel(m.id, { priceIn: Number(e.target.value) })} />
+                        <Label>输出单价/1M</Label>
+                        <Input type="number" value={m.priceOut}
+                          onClick={e => e.stopPropagation()}
+                          onChange={e => updateModel(m.id, { priceOut: Number(e.target.value) })} />
+                        <Label>超时（秒）</Label>
+                        <Input type="number" value={m.timeoutSeconds ?? 0}
+                          placeholder="0 = 默认 300"
+                          onClick={e => e.stopPropagation()}
+                          onChange={e => updateModel(m.id, { timeoutSeconds: Number(e.target.value) })} />
+                        <Label>发送 agent_id</Label>
+                        <Switch checked={!m.disableExtraFields}
+                          onCheckedChange={v => updateModel(m.id, { disableExtraFields: !v })} />
+                      </div>
+                      <div className="row-actions">
+                        <Button
+                          variant="destructive"
+                          size="icon-sm"
+                          title="删除模型"
+                          aria-label={`删除模型 ${m.name || m.model || m.id}`}
+                          onClick={e => { e.stopPropagation(); removeModel(m.id) }}
+                        ><Trash2 /></Button>
+                      </div>
+                    </div>
+                    <div className="meta">{cfg.activeModelId === m.id ? '当前使用' : '点击设为当前'}</div>
+                  </div>
+                ))}
+              </section>
+            )}
             <p className="hint">
               配置文件：{dir || '…'}<br />
               点击模型行会立即设为当前模型；其它字段修改需点右下角「保存」。
-              一个 OpenAI 兼容配置即可覆盖 DeepSeek / Qwen / GLM / OpenAI 等；保存后对当前会话下一轮生效。
-              超时 0 表示默认 300s；「发送 agent_id」关闭后请求体不再带 agent_id/user_id（严格端点兼容）。
+              保存后对当前会话下一轮生效；超时 0 表示默认 300s。
             </p>
           </>
         )}
 
         {tab === 'skills' && (
           <>
-            <h3>Skills（可复用指令包）</h3>
+            <div className="settings-head">
+              <h3>Skills（可复用指令包）</h3>
+              <Button variant="secondary" size="xs" onClick={addGlobalSkill}>
+                <Plus className="size-3.5" /> 添加 Skill
+              </Button>
+            </div>
             <p className="hint">启用的 Skill 会追加到主 Agent 的动态上下文尾部（不破坏提示词缓存前缀）；保存后对当前会话下一轮生效。</p>
-            <SkillEditor skills={cfg.skills} onChange={skills => patch({ skills })} />
+            <SkillEditor skills={cfg.skills} onChange={skills => patch({ skills })} showAddButton={false} />
           </>
         )}
 
         {tab === 'mcp' && (
           <>
-            <h3>MCP Server（外部工具）</h3>
+            <div className="settings-head">
+              <h3>MCP Server（外部工具）</h3>
+              <Button variant="secondary" size="xs" onClick={addGlobalMCPServer}>
+                <Plus className="size-3.5" /> 添加 MCP Server
+              </Button>
+            </div>
             <p className="hint">
               支持 stdio 与 HTTP/SSE 远程连接。已启用 Server 在新建会话或配置变更后连接，工具以 mcp_&lt;server&gt;_&lt;tool&gt; 暴露给主 Agent；
               默认每次调用需审批（可「批准并记住」）。「只读工具免审批」仅对服务器声明 readOnlyHint=true 的工具跳过审批，默认关闭——
               该注解来自服务器，不可完全信任。
             </p>
-            <MCPEditor servers={cfg.mcpServers} onChange={mcpServers => patch({ mcpServers })} />
+            <MCPEditor servers={cfg.mcpServers} onChange={mcpServers => patch({ mcpServers })} showAddButton={false} />
           </>
         )}
 
@@ -521,73 +740,90 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
               项目级配置来自 {agentDir || '.aidog'}；加载前需确认信任，高危配置会被自动拉黑。
               保存后下次构建 Agent 时生效。
             </p>
-            {projectStatus ? (
-              <div className="model-row">
-                <div style={{ flex: 1 }}>
-                  <div className="form-grid">
-                    <Label>信任状态</Label>
-                    <div>
-                      <Badge variant="outline">{projectStatus.status}</Badge>
-                      {projectStatus.audit?.blocked && (
-                        <span className="hint text-destructive"> 存在高危配置</span>
-                      )}
-                    </div>
-                    <Label>审计统计</Label>
-                    <div className="hint">
-                      高危 {projectStatus.audit?.highCount ?? 0} · 中危 {projectStatus.audit?.mediumCount ?? 0} · 低危 {projectStatus.audit?.lowCount ?? 0}
-                    </div>
-                  </div>
-                  <div className="row-actions">
-                    {projectStatus.status === 'untrusted' && (
-                      <Button variant="secondary" size="sm" disabled={projectBusy}
-                        onClick={() => updateTrust('trust')}>信任项目配置</Button>
-                    )}
-                    {projectStatus.status === 'trusted' && (
-                      <Button variant="outline" size="sm" disabled={projectBusy}
-                        onClick={() => updateTrust('untrust')}>取消信任</Button>
-                    )}
-                    {projectStatus.status === 'blocked' && (
-                      <Button variant="destructive" size="sm" disabled={projectBusy}
-                        onClick={() => updateTrust('unblock')}>解除拉黑（需再次确认信任）</Button>
-                    )}
-                  </div>
+            <section className="settings-section">
+              <div className="settings-section-head">
+                <h4>项目配置</h4>
+                <div className="settings-section-actions">
+                  {projectStatus?.status === 'untrusted' && (
+                    <Button variant="secondary" size="xs" disabled={projectBusy}
+                      onClick={() => updateTrust('trust')}>信任项目配置</Button>
+                  )}
+                  {projectStatus?.status === 'trusted' && (
+                    <Button variant="outline" size="xs" disabled={projectBusy}
+                      onClick={() => updateTrust('untrust')}>取消信任</Button>
+                  )}
+                  {projectStatus?.status === 'blocked' && (
+                    <Button variant="destructive" size="xs" disabled={projectBusy}
+                      onClick={() => updateTrust('unblock')}>解除拉黑</Button>
+                  )}
                 </div>
-                <div className="meta">{projectStatus.root}</div>
               </div>
-            ) : (
-              <p className="hint">设置工作区后可查看项目配置状态。</p>
-            )}
-            {projectStatus?.audit?.findings?.length > 0 && (
-              <div className="model-row">
-                <div style={{ flex: 1 }}>
-                  <h4>审计发现</h4>
+              {projectStatus ? (
+                <div className="form-grid">
+                  <Label>信任状态</Label>
+                  <div className="form-value">
+                    <Badge variant="outline">{projectStatus.status}</Badge>
+                    {projectStatus.audit?.blocked && (
+                      <span className="hint text-destructive">存在高危配置</span>
+                    )}
+                  </div>
+                  <Label>审计统计</Label>
+                  <div className="form-value hint">
+                    高危 {projectStatus.audit?.highCount ?? 0} · 中危 {projectStatus.audit?.mediumCount ?? 0} · 低危 {projectStatus.audit?.lowCount ?? 0}
+                  </div>
+                  <Label>项目根目录</Label>
+                  <div className="form-value hint">{projectStatus.root}</div>
+                </div>
+              ) : (
+                <p className="hint">设置工作区后可查看项目配置状态。</p>
+              )}
+              {projectStatus?.audit?.findings?.length > 0 && (
+                <>
+                  <div className="settings-subhead">审计发现</div>
                   <ul className="hint">
                     {projectStatus.audit.findings.map((f: any, i: number) => (
                       <li key={i}>[{f.severity}] {f.rule} · {f.file} · {f.evidence}</li>
                     ))}
                   </ul>
+                </>
+              )}
+            </section>
+
+            <section className="settings-section">
+              <div className="settings-section-head">
+                <h4>项目 Agent（work agent）</h4>
+                <div className="settings-section-actions">
+                  <Button variant="secondary" size="xs" disabled={!agentDir} onClick={addAgent}>
+                    <Plus className="size-3.5" /> 添加 Agent
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="xs"
+                    disabled={!agentDir || !activeSessionId || smithBusy}
+                    title={activeSessionId ? '运行 agent-smith 优化项目 Agent' : '先在左侧选择一个线程'}
+                    onClick={optimizeAgents}
+                  ><Wand2 className="size-3.5" /> {smithBusy ? '优化中…' : '优化 Agent'}</Button>
                 </div>
               </div>
-            )}
-            <h4>项目 Agent（work agent）</h4>
-            <p className="hint">
-              目录：{agentDir || '未设置工作区，请先在左侧「项目」选择目录'}<br />
-              每个 Agent 对应 .aidog/agents 下的一个 .json 文件：agent_id（自动生成固化，唯一不变）/ name / description / system_prompt / model / tools / skills / mcp_servers / max_turns / budget / context。<br />
-              work agent 按此定义分派执行（独立上下文 / Skill / MCP 工具集）；保存后对当前会话下一轮生效。
-            </p>
-            {!agentDir && <p className="hint">设置工作区后即可添加项目级 Agent。</p>}
-            <div className="form-grid" style={{ marginBottom: 12 }}>
-              <Label>自动优化 Agent</Label>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Switch
-                  checked={!!cfg.agentSmithAuto}
-                  onCheckedChange={v => patch({ agentSmithAuto: v })}
-                />
-                <span className="hint">任务失败/取消后自动运行 agent-smith（写配置仍需审批）</span>
+              {smithMsg && <p className="hint">{smithMsg}</p>}
+              <p className="hint">
+                目录：{agentDir || '未设置工作区，请先在左侧「项目」选择目录'}<br />
+                每个 Agent 对应 .aidog/agents 下的一个 .yml 文件：agent_id（自动生成固化，唯一不变）/ name / description / system_prompt / model / tools / skills / mcp_servers / max_turns / budget / context。<br />
+                work agent 按此定义分派执行（独立上下文 / Skill / MCP 工具集）；保存后对当前会话下一轮生效。
+              </p>
+              {!agentDir && <p className="hint">设置工作区后即可添加项目级 Agent。</p>}
+              <div className="form-grid" style={{ margin: '12px 0' }}>
+                <Label>自动优化 Agent</Label>
+                <div className="form-value">
+                  <Switch
+                    checked={!!cfg.agentSmithAuto}
+                    onCheckedChange={v => patch({ agentSmithAuto: v })}
+                  />
+                  <span className="hint">任务失败/取消后自动运行 agent-smith（写配置仍需审批）</span>
+                </div>
               </div>
-            </div>
-            {agents.length === 0 && <p className="hint">暂无项目 Agent，点击下方「添加 Agent」创建。</p>}
-            {agents.map((a, i) => (
+              {agents.length === 0 && <p className="hint">暂无项目 Agent，点击右上角「添加 Agent」创建。</p>}
+              {agents.map((a, i) => (
               <div key={i} className="model-row">
                 <div style={{ flex: 1 }}>
                   <div className="form-grid">
@@ -661,37 +897,49 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
                   </div>
                 </div>
                 <div className="meta">
-                  {a.name || '未命名'}.json
+                  {a.name || '未命名'}.yml
                   {a.agent_id && <div className="agent-id">{a.agent_id}</div>}
                 </div>
               </div>
             ))}
-            <div className="row-actions">
-              <Button variant="secondary" size="sm" disabled={!agentDir} onClick={() => setAgents(a => [...a, {
-                agent_id: '', name: '', description: '', system_prompt: '', model: '',
-                tools: '', skills: '', mcp_servers: '', max_turns: 0,
-                budget: {}, context: {},
-              }])}><Plus className="size-3.5" /> 添加 Agent</Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={!agentDir || !activeSessionId || smithBusy}
-                title={activeSessionId ? '运行 agent-smith 优化项目 Agent' : '先在左侧选择一个线程'}
-                onClick={optimizeAgents}
-              ><Wand2 className="size-3.5" /> {smithBusy ? '优化中…' : '优化 Agent'}</Button>
-              {smithMsg && <span className="hint">{smithMsg}</span>}
-            </div>
-            <h4>项目专属 Skills</h4>
-            <SkillEditor
-              skills={projectCfg.skills ?? []}
-              onChange={skills => setProjectCfg((c: any) => ({ ...c, skills }))}
-            />
-            <h4>项目专属 MCP Server</h4>
-            <MCPEditor
-              servers={projectCfg.mcpServers ?? []}
-              onChange={mcpServers => setProjectCfg((c: any) => ({ ...c, mcpServers }))}
-            />
-            <h4>主 Agent 覆盖（.aidog/main.json）</h4>
+            </section>
+
+            <section className="settings-section">
+              <div className="settings-section-head">
+                <h4>项目专属 Skills</h4>
+                <div className="settings-section-actions">
+                  <Button variant="secondary" size="xs" onClick={addProjectSkill}>
+                    <Plus className="size-3.5" /> 添加 Skill
+                  </Button>
+                </div>
+              </div>
+              <SkillEditor
+                skills={projectCfg.skills ?? []}
+                onChange={skills => setProjectCfg((c: any) => ({ ...c, skills }))}
+                showAddButton={false}
+              />
+            </section>
+
+            <section className="settings-section">
+              <div className="settings-section-head">
+                <h4>项目专属 MCP Server</h4>
+                <div className="settings-section-actions">
+                  <Button variant="secondary" size="xs" onClick={addProjectMCPServer}>
+                    <Plus className="size-3.5" /> 添加 MCP Server
+                  </Button>
+                </div>
+              </div>
+              <MCPEditor
+                servers={projectCfg.mcpServers ?? []}
+                onChange={mcpServers => setProjectCfg((c: any) => ({ ...c, mcpServers }))}
+                showAddButton={false}
+              />
+            </section>
+
+            <section className="settings-section">
+              <div className="settings-section-head">
+                <h4>主 Agent 覆盖（.aidog/main.yml）</h4>
+              </div>
             {(() => {
               const main = projectCfg.main ?? {}
               const listText = (v: any) => Array.isArray(v) ? v.join(', ') : ''
@@ -715,7 +963,7 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
                     <Input value={listText(main.mcp_servers)} placeholder="全局或项目 MCP 名称"
                       onChange={e => patchMain({ mcp_servers: parseList(e.target.value) })} />
                   </div>
-                  <h4>执行预算（0 = 默认值）</h4>
+                  <div className="settings-subhead">执行预算（0 = 默认值）</div>
                   <div className="form-grid">
                     <Label>最大步骤</Label>
                     <Input type="number" value={main.budget?.max_steps ?? 0}
@@ -736,7 +984,7 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
                     <Input type="number" value={main.budget?.max_retries ?? 0}
                       onChange={e => patchMain({ budget: { ...(main.budget ?? {}), max_retries: Number(e.target.value) } })} />
                   </div>
-                  <h4>上下文压缩（阈值 0-1，0 = 默认 0.7）</h4>
+                  <div className="settings-subhead">上下文压缩（阈值 0-1，0 = 默认 0.7）</div>
                   <div className="form-grid">
                     <Label>触发阈值</Label>
                     <Input type="number" step="0.05" min="0" max="1"
@@ -749,6 +997,8 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
                 </>
               )
             })()}
+            </section>
+
             <div className="row-actions">
               <Button variant="secondary" size="sm" disabled={projectBusy} onClick={saveProject}>
                 保存项目配置
@@ -869,6 +1119,57 @@ function SettingsPanel({ activeSessionId, onDirtyChange }: {
           )}
         </div>
       </Tabs>
+
+      {/* 供应商模型检测：勾选后批量添加 */}
+      <Dialog open={!!detect} onOpenChange={v => { if (!v) setDetect(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>检测可用模型</DialogTitle>
+            <DialogDescription>
+              {detect ? `供应商：${detect.providerName}` : ''}
+            </DialogDescription>
+          </DialogHeader>
+          {detect?.loading && <p className="detect-status">正在请求 /models…</p>}
+          {detect?.error && <p className="detect-error">{detect.error}</p>}
+          {detect && !detect.loading && detect.models.length > 0 && (
+            <>
+              <div className="detect-toolbar">
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => setDetect(prev => prev ? { ...prev, selected: new Set(prev.models) } : prev)}
+                >全选</Button>
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => setDetect(prev => prev ? { ...prev, selected: new Set() } : prev)}
+                >全不选</Button>
+                <span className="detect-count">已选 {detect.selected.size} / {detect.models.length}</span>
+              </div>
+              <div className="detect-list">
+                {detect.models.map(id => (
+                  <label key={id} className="detect-item">
+                    <input
+                      type="checkbox"
+                      checked={detect.selected.has(id)}
+                      onChange={() => toggleDetectModel(id)}
+                    />
+                    <span>{id}</span>
+                  </label>
+                ))}
+              </div>
+            </>
+          )}
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setDetect(null)}>取消</Button>
+            <Button
+              size="sm"
+              disabled={!detect || detect.loading || detect.selected.size === 0}
+              onClick={confirmDetect}
+            >添加选中（{detect?.selected.size ?? 0}）</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

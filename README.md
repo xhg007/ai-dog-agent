@@ -12,13 +12,13 @@
 ## 架构要点
 
 - **主 Agent（Orchestrator）**：常驻编排，制定计划、分派子 Agent；按项目 Agent 列表动态生成 `dispatch_<name>` 工具。
-- **子 Agent**：配置随项目走（workspace 内 `.aidog/agents/*.json`），独立上下文 / skill / MCP / function call / 模型；空工具默认只读。
+- **子 Agent**：配置随项目走（workspace 内 `.aidog/agents/*.yml`），独立上下文 / skill / MCP / function call / 模型；空工具默认只读。
 - **执行上限**：步骤、Token、时间、工具次数、预算、重试六项上限，由 Agent Runtime 统一计数并以结构化原因终止。
-- **项目级配置**：`.aidog/main.json`（主 Agent 覆盖）、`mcp_servers.json`、`skills.json` 与全局配置在运行时合并，不写回全局。
+- **项目级配置**：`.aidog/main.yml`（主 Agent 覆盖与项目 `agent_id`）、`mcp_servers.yml`、`skills.yml` 与全局配置在运行时合并，不写回全局。
 - **后台 Meta Agent**：专职优化与创造子 Agent 配置（阶段 D，未实现）。
 - **上下文前缀稳定**：系统提示词静态前缀在前、动态内容追加在后，保证提示词缓存命中。
 - **会话持久化**：会话元数据与消息历史按会话落盘 `%AppData%/ai-dog-agent/sessions/*.json`，关闭软件后线程列表与对话记录可恢复，并在后续轮次回放历史。
-- **配置**：设置页提供模型（OpenAI 兼容）、Skills、MCP Server 的可视化编辑；「项目设置」tab 统一编辑项目级子 Agent（`.aidog/agents/*.json`，含预算与压缩）、主 Agent 覆盖、项目专属 MCP/Skill 与 `.aidog` 信任确认；启用项追加到主 Agent 动态上下文。
+- **配置**：设置页提供模型（OpenAI 兼容）、Skills、MCP Server 的可视化编辑；「项目设置」tab 统一编辑项目级子 Agent（`.aidog/agents/*.yml`，含预算与压缩）、主 Agent 覆盖、项目专属 MCP/Skill 与 `.aidog` 信任确认；启用项追加到主 Agent 动态上下文。
 - **Markdown**：助手回复支持 GFM 表格、代码块、列表（remark-gfm）。
 
 ## 开发
@@ -49,12 +49,15 @@ DuckDB 使用**动态库模式**（`-tags=duckdb_use_lib`），以便加载 vss 
 运行可执行文件时共享库必须在同目录（或启动前已在 PATH / `LD_LIBRARY_PATH` /
 `DYLD_LIBRARY_PATH` 中）。
 
-Go 侧测试（默认静态 2.0.1 可用；动态库模式需设置同样的 CGO 环境并加
-`-tags=duckdb_use_lib`）：
+DuckDB 固定使用动态库模式（`-tags=duckdb_use_lib`），`go.mod` 不再包含各平台预编译静态库。
+所有 Go 命令（build/test/vet）与 IDE/gopls 都必须带该标签，并设置与构建相同的 CGO 环境：
 
 ```bash
-go test ./internal/...
+go test -tags duckdb_use_lib ./internal/...
 ```
+
+> 注意：不要运行 `go mod tidy` / `go mod vendor`——它们会把 `go.duckdb.org/libduckdb/*`
+> 预编译库重新写回（约 750MB）。新增依赖时请手工维护 `go.mod`。
 
 ## 里程碑
 

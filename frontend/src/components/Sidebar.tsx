@@ -1,7 +1,8 @@
-import { FolderOpen, MessageSquare, Plus, Settings, X } from 'lucide-react'
+import { Activity, FolderOpen, MessageSquare, Plus, Settings, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { ObservabilityService } from '../../bindings/ai-dog-agent/internal/service/index.js'
 import { ThreadInfo } from '../App'
 import TaskPanel from './TaskPanel'
 
@@ -36,6 +37,11 @@ function timeLabel(ms: number): string {
 }
 
 export default function Sidebar({ threads, activeId, wsPath, sideView, onSideView, onSelect, onNew, onDelete, onBrowseWorkspace, onOpenSettings }: Props) {
+  // 观测窗口由 Go 侧创建/聚焦；打开失败不应打断主窗口（错误已由 Wails 统一记录）
+  const openObservability = () => {
+    void ObservabilityService.OpenWindow().catch(() => { /* 忽略 */ })
+  }
+
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -125,9 +131,21 @@ export default function Sidebar({ threads, activeId, wsPath, sideView, onSideVie
       </div>
 
       <div className="side-footer">
-        <Button variant="ghost" size="sm" className="flex-1 justify-start gap-2" onClick={onOpenSettings}>
-          <Settings className="size-3.5" /> 设置
-        </Button>
+        <div className="side-footer-actions">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="flex-1 justify-start gap-1.5 px-2"
+            onClick={openObservability}
+            title="打开 Agent 协作观测台"
+            aria-label="打开 Agent 协作观测台"
+          >
+            <Activity className="size-3.5" /> 观测
+          </Button>
+          <Button variant="ghost" size="sm" className="flex-1 justify-start gap-1.5 px-2" onClick={onOpenSettings}>
+            <Settings className="size-3.5" /> 设置
+          </Button>
+        </div>
         <span className="side-version">v0.2</span>
       </div>
     </aside>

@@ -4,12 +4,18 @@
 import * as ApprovalService from "./approvalservice.js";
 import * as ConfigService from "./configservice.js";
 import * as MCPService from "./mcpservice.js";
+import * as ObservabilityService from "./observabilityservice.js";
 import * as TaskService from "./taskservice.js";
 import * as WorkspaceService from "./workspaceservice.js";
 export {
     ApprovalService,
     ConfigService,
     MCPService,
+    ObservabilityService,
     TaskService,
     WorkspaceService
 };
+
+export type {
+    ObservationSnapshot
+} from "./models.js";

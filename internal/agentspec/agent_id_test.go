@@ -1,9 +1,9 @@
 package agentspec
 
 // 项目级 Agent 稳定 ID（M5 追加）：
-// 1) 每个子 Agent 配置文件（.aidog/agents/*.json）含唯一不变 agent_id
+// 1) 每个子 Agent 配置文件（.aidog/agents/*.yml）含唯一不变 agent_id
 //   （UUID 去连字符），保存时自动生成、加载时对缺失项迁移固化；
-// 2) 项目主 Agent ID 固化在 .aidog/agent_id——同一项目恒定，
+// 2) 项目主 Agent ID 固化在 .aidog/main.yml 的 agent_id——同一项目恒定，
 //   供应商侧（限流归因/上下文缓存）只有相同 agent_id 才能复用。
 
 import (
@@ -33,7 +33,7 @@ func TestSaveGeneratesAgentID(t *testing.T) {
 		t.Fatalf("agent_id 应为 32 位无连字符 UUID: %q", id)
 	}
 	// 已固化到文件
-	data, _ := os.ReadFile(filepath.Join(Dir(root), "reviewer.json"))
+	data, _ := os.ReadFile(filepath.Join(Dir(root), "reviewer.yml"))
 	if !strings.Contains(string(data), id) {
 		t.Fatalf("agent_id 未固化到配置文件: %s", data)
 	}
@@ -66,43 +66,18 @@ func TestListMigratesMissingAgentID(t *testing.T) {
 	if !validAgentID(id) {
 		t.Fatalf("迁移后 agent_id 不符: %q", id)
 	}
-	// 已写回固化
-	data, _ := os.ReadFile(filepath.Join(Dir(root), "legacy.json"))
-	if !strings.Contains(string(data), id) {
-		t.Fatalf("迁移结果未写回文件: %s", data)
+	// 已迁移为 YAML 并写回固化；旧 JSON 保留为 .bak
+	data, err := os.ReadFile(filepath.Join(Dir(root), "legacy.yml"))
+	if err != nil || !strings.Contains(string(data), id) {
+		t.Fatalf("迁移结果未写回 YAML: %s, %v", data, err)
+	}
+	if _, err := os.Stat(filepath.Join(Dir(root), "legacy.json.bak")); err != nil {
+		t.Fatalf("旧 JSON 未保留为 .bak: %v", err)
 	}
 	// 再次 List 稳定不变
 	list2, _ := List(root)
 	if list2[0].AgentID != id {
 		t.Fatal("agent_id 应稳定不变")
-	}
-}
-
-// TestEnsureAgentIDStable 项目主 Agent ID 固化与稳定。
-func TestEnsureAgentIDStable(t *testing.T) {
-	root := t.TempDir()
-	id1, err := EnsureAgentID(root)
-	if err != nil {
-		t.Fatalf("EnsureAgentID: %v", err)
-	}
-	if !validAgentID(id1) {
-		t.Fatalf("ID 格式不符: %q", id1)
-	}
-	id2, err := EnsureAgentID(root)
-	if err != nil {
-		t.Fatalf("EnsureAgentID2: %v", err)
-	}
-	if id1 != id2 {
-		t.Fatalf("同一项目 ID 应稳定: %q != %q", id1, id2)
-	}
-	// 文件已固化
-	if b, err := os.ReadFile(AgentIDFile(root)); err != nil || strings.TrimSpace(string(b)) != id1 {
-		t.Fatalf("agent_id 文件不符: %s, %v", b, err)
-	}
-	// 不同项目不同 ID
-	id3, _ := EnsureAgentID(t.TempDir())
-	if id3 == id1 {
-		t.Fatal("不同项目应生成不同 ID")
 	}
 }
 
@@ -123,12 +98,5 @@ func TestSaveEditKeepsAgentID(t *testing.T) {
 	}
 	if list[0].SystemPrompt != "v2" {
 		t.Fatal("编辑内容未生效")
-	}
-}
-
-// TestEnsureAgentIDEmptyRoot 未设置 workspace 时报错。
-func TestEnsureAgentIDEmptyRoot(t *testing.T) {
-	if _, err := EnsureAgentID(""); err == nil {
-		t.Fatal("空 root 应报错")
 	}
 }

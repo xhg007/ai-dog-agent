@@ -1,15 +1,14 @@
 package config
 
 // 项目级配置分层（<workspace>/.aidog）：
-//   - main.json        主 Agent 覆盖（模型引用 / 工具 / Skill / MCP / 预算 / 压缩）
-//   - mcp_servers.json 项目专属 MCP Server
-//   - skills.json      项目专属 Skill
+//   - main.yml         主 Agent 覆盖与项目稳定 agent_id（模型 / 工具 / Skill / MCP / 预算 / 压缩）
+//   - mcp_servers.yml  项目专属 MCP Server
+//   - skills.yml       项目专属 Skill
 //
-// 项目级只在运行时与全局配置合并，不写回全局 config.json。
+// 项目级只在运行时与全局配置合并，不写回全局 config.yml。
 // .aidog 可随仓库分发，加载时记录信任告警（信任确认 UI 留阶段 E）。
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -20,22 +19,24 @@ import (
 	"ai-dog-agent/internal/agentspec"
 )
 
-// ProjectMain 主 Agent 的项目级覆盖（.aidog/main.json）。
+// ProjectMain 主 Agent 的项目级覆盖（.aidog/main.yml）。
 type ProjectMain struct {
-	Model      string                  `json:"model,omitempty"`       // 覆盖激活模型（ID/Name/Model）
-	Tools      []string                `json:"tools,omitempty"`       // 主 Agent 工具白名单
-	Skills     []string                `json:"skills,omitempty"`      // 引用的 Skill（ID/Name）
-	MCPServers []string                `json:"mcp_servers,omitempty"` // 引用的 MCP Server（ID/Name）
-	Budget     agentspec.Budget        `json:"budget,omitzero"`
-	Context    agentspec.ContextConfig `json:"context,omitzero"`
+	// AgentID 项目主 Agent 稳定 ID（旧版 .aidog/agent_id 会自动迁移到此）。
+	AgentID    string                  `json:"agent_id,omitempty" yaml:"agent_id,omitempty"`
+	Model      string                  `json:"model,omitempty" yaml:"model,omitempty"`             // 覆盖激活模型（ID/Name/Model）
+	Tools      []string                `json:"tools,omitempty" yaml:"tools,omitempty"`             // 主 Agent 工具白名单
+	Skills     []string                `json:"skills,omitempty" yaml:"skills,omitempty"`           // 引用的 Skill（ID/Name）
+	MCPServers []string                `json:"mcp_servers,omitempty" yaml:"mcp_servers,omitempty"` // 引用的 MCP Server（ID/Name）
+	Budget     agentspec.Budget        `json:"budget,omitzero" yaml:"budget,omitempty"`
+	Context    agentspec.ContextConfig `json:"context,omitzero" yaml:"context,omitempty"`
 }
 
 // ProjectConfig 项目级配置集合。
 type ProjectConfig struct {
-	Root       string            `json:"-"`
-	Main       ProjectMain       `json:"main,omitzero"`
-	MCPServers []MCPServerConfig `json:"mcpServers,omitempty"`
-	Skills     []SkillConfig     `json:"skills,omitempty"`
+	Root       string            `json:"-" yaml:"-"`
+	Main       ProjectMain       `json:"main,omitzero" yaml:"main,omitempty"`
+	MCPServers []MCPServerConfig `json:"mcpServers,omitempty" yaml:"mcpServers,omitempty"`
+	Skills     []SkillConfig     `json:"skills,omitempty" yaml:"skills,omitempty"`
 }
 
 // ProjectDir 返回项目级配置目录（<root>/.aidog）。
@@ -58,37 +59,33 @@ func LoadProject(root string) (*ProjectConfig, error) {
 	// 信任边界：.aidog 可被仓库携带，MCP command / Skill 指令等同可执行配置。
 	slog.Warn("检测到项目级配置目录 .aidog，其内容可随仓库分发，请确认项目来源可信",
 		"root", root)
-	if err := readJSONFile(filepath.Join(dir, "main.json"), &pc.Main); err != nil {
+	if err := loadProjectFile(dir, "main", &pc.Main); err != nil {
 		return nil, err
 	}
-	if err := readJSONFile(filepath.Join(dir, "mcp_servers.json"), &pc.MCPServers); err != nil {
+	if err := loadProjectFile(dir, "mcp_servers", &pc.MCPServers); err != nil {
 		return nil, err
 	}
-	if err := readJSONFile(filepath.Join(dir, "skills.json"), &pc.Skills); err != nil {
+	if err := loadProjectFile(dir, "skills", &pc.Skills); err != nil {
 		return nil, err
 	}
 	return pc, nil
 }
 
-// readJSONFile 读取 JSON 文件到 dst；文件不存在或为空视为未配置。
-func readJSONFile(path string, dst any) error {
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
+// loadProjectFile 读取项目配置（.yml）；不存在时尝试旧 .json 并自动迁移。
+func loadProjectFile(dir, base string, dst any) error {
+	target := filepath.Join(dir, base+".yml")
+	exists, err := readYAMLFile(target, dst)
 	if err != nil {
-		return fmt.Errorf("读取 %s 失败: %w", path, err)
+		return err
 	}
-	if len(strings.TrimSpace(string(data))) == 0 {
+	if exists {
 		return nil
 	}
-	if err := json.Unmarshal(data, dst); err != nil {
-		return fmt.Errorf("解析 %s 失败: %w", path, err)
-	}
-	return nil
+	_, err = migrateJSONToYAML(target, filepath.Join(dir, base+".json"), dst)
+	return err
 }
 
-// SaveProject 写入项目级配置（main.json / mcp_servers.json / skills.json）。
+// SaveProject 写入项目级配置（main.yml / mcp_servers.yml / skills.yml）。
 // 写入前按全局配置同样的规则校验 MCP/Skill；采用临时文件 + rename 原子替换。
 func SaveProject(root string, pc ProjectConfig) error {
 	if strings.TrimSpace(root) == "" {
@@ -101,43 +98,64 @@ func SaveProject(root string, pc ProjectConfig) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("创建项目配置目录失败: %w", err)
 	}
-	if err := writeJSONAtomic(filepath.Join(dir, "main.json"), pc.Main); err != nil {
+	if err := writeYAMLAtomic(filepath.Join(dir, "main.yml"), pc.Main); err != nil {
 		return err
 	}
-	if err := writeJSONAtomic(filepath.Join(dir, "mcp_servers.json"), pc.MCPServers); err != nil {
+	if err := writeYAMLAtomic(filepath.Join(dir, "mcp_servers.yml"), pc.MCPServers); err != nil {
 		return err
 	}
-	return writeJSONAtomic(filepath.Join(dir, "skills.json"), pc.Skills)
-}
-
-// writeJSONAtomic 以 0600 权限原子写入 JSON（空切片写为 []，便于人工编辑）。
-func writeJSONAtomic(path string, v any) error {
-	var data []byte
-	var err error
-	switch t := v.(type) {
-	case []MCPServerConfig:
-		if t == nil {
-			data = []byte("[]")
-		}
-	case []SkillConfig:
-		if t == nil {
-			data = []byte("[]")
-		}
+	if err := writeYAMLAtomic(filepath.Join(dir, "skills.yml"), pc.Skills); err != nil {
+		return err
 	}
-	if data == nil {
-		data, err = json.MarshalIndent(v, "", "  ")
-		if err != nil {
-			return fmt.Errorf("序列化 %s 失败: %w", filepath.Base(path), err)
+	// 旧 JSON 保存后统一改名备份，避免下次加载误读
+	for _, base := range []string{"main", "mcp_servers", "skills"} {
+		legacy := filepath.Join(dir, base+".json")
+		if _, err := os.Stat(legacy); err == nil {
+			if err := os.Rename(legacy, legacy+".bak"); err != nil {
+				slog.Warn("旧项目配置备份失败", "file", legacy, "err", err)
+			}
 		}
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return fmt.Errorf("写入 %s 失败: %w", filepath.Base(path), err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return fmt.Errorf("替换 %s 失败: %w", filepath.Base(path), err)
 	}
 	return nil
+}
+
+// EnsureProjectAgentID 读取/生成项目主 Agent 稳定 ID，并写入 .aidog/main.yml。
+// 旧版 .aidog/agent_id 会迁移进 main.yml，原文件重命名为 .bak。
+func EnsureProjectAgentID(root string) (string, error) {
+	if strings.TrimSpace(root) == "" {
+		return "", agentspec.ErrNoWorkspace
+	}
+	pc, err := LoadProject(root)
+	if err != nil {
+		return "", err
+	}
+	if id := strings.TrimSpace(pc.Main.AgentID); agentspec.IsValidAgentID(id) {
+		return id, nil
+	}
+	legacy := filepath.Join(ProjectDir(root), "agent_id")
+	id := ""
+	if b, err := os.ReadFile(legacy); err == nil {
+		if v := strings.TrimSpace(string(b)); agentspec.IsValidAgentID(v) {
+			id = v
+		}
+	}
+	if id == "" {
+		id = agentspec.NewAgentID()
+	}
+	pc.Main.AgentID = id
+	dir := ProjectDir(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("创建项目配置目录失败: %w", err)
+	}
+	if err := writeYAMLAtomic(filepath.Join(dir, "main.yml"), pc.Main); err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(legacy); err == nil {
+		if err := os.Rename(legacy, legacy+".bak"); err != nil {
+			slog.Warn("旧 agent_id 已迁移，但备份重命名失败", "file", legacy, "err", err)
+		}
+	}
+	return id, nil
 }
 
 // MergeProject 把项目级配置合并进全局配置副本：

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ComponentType } from 'react'
 import { Events } from '@wailsio/runtime'
 import {
-  ArrowDown, Bot, Compass, FileText, FlaskConical, Folder, GitBranch, Hammer,
+  ArrowDown, Bot, Check, Compass, Copy, FileText, FlaskConical, Folder, GitBranch, Hammer,
   Microscope, Pencil, Search, SendHorizontal, Square, Terminal, Wrench,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -14,6 +14,7 @@ import { ConfigService } from '../../bindings/ai-dog-agent/internal/service/inde
 import ApprovalCard, { PendingApproval } from './ApprovalCard'
 import AgentMessageCard, { AgentMessageData } from './AgentMessageCard'
 import MarkdownBody from './MarkdownBody'
+import { copyText } from '../lib/clipboard'
 
 interface Msg {
   role: 'user' | 'assistant' | 'error' | 'tool' | 'system' | 'agent'
@@ -68,6 +69,27 @@ function mergeToolResult(m: Msg[], tool: string, content: string): Msg[] {
   return [...m, { role: 'tool', tool, content }]
 }
 
+// MessageCopyButton 复制 AI 回复的 Markdown 原文（悬停在气泡上显示）。
+function MessageCopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  const onCopy = async () => {
+    if (!(await copyText(text))) return
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1400)
+  }
+  return (
+    <button
+      type="button"
+      className="msg-copy"
+      title={copied ? '已复制' : '复制回复'}
+      aria-label={copied ? '已复制' : '复制回复'}
+      onClick={onCopy}
+    >
+      {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+    </button>
+  )
+}
+
 export default function ThreadPanel({ activeId, activeTitle, wsPath, runningHint, pendingApprovals, onApprovalDone }: {
   activeId: string
   activeTitle: string
@@ -79,6 +101,10 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, runningHint
   const [messages, setMessages] = useState<Msg[]>([])
   const [input, setInput] = useState('')
   const [running, setRunning] = useState(false)
+  // awaiting：已发送、尚未收到首个 token（聊天区显示「思考中」占位）
+  // streaming：正在流式输出（显示光标）；两者都由事件驱动，避免 ref 不触发渲染
+  const [awaiting, setAwaiting] = useState(false)
+  const [streaming, setStreaming] = useState(false)
   const [usage, setUsage] = useState<Usage | null>(null)
   const [modelName, setModelName] = useState('')
   const [agentId, setAgentId] = useState('')
@@ -95,7 +121,6 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, runningHint
   const [activeModelId, setActiveModelId] = useState('')
 
   const scrollRef = useRef<HTMLDivElement>(null)
-  const streamingRef = useRef(false)
   // 中文输入法：Enter 是选词确认，不是发送。部分浏览器 compositionend 早于 keydown，
   // 所以同时用 composition 事件与 nativeEvent.isComposing 双重判断。
   const composingRef = useRef(false)
@@ -109,6 +134,8 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, runningHint
     setModelName('')
     setAgentId('')
     setRunning(false)
+    setAwaiting(false)
+    setStreaming(false)
     setOpenSteps({})
     atBottomRef.current = true
     setAtBottom(true)
@@ -128,7 +155,7 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, runningHint
   // 后端仍在执行该线程（例如切回运行中的线程）：恢复「执行中/中断」状态，
   // 否则会出现可点发送但被后端拒绝、也点不到中断的情况。
   useEffect(() => {
-    if (runningHint) setRunning(true)
+    if (runningHint) { setRunning(true); setAwaiting(true) }
   }, [activeId, runningHint])
 
   useEffect(() => {
@@ -146,13 +173,15 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, runningHint
       if (!e || e.sessionId !== activeId) return
       switch (e.type) {
         case 'chat_started':
-          streamingRef.current = true
+          setStreaming(true)
+          setAwaiting(true)
           setCost(0)
           if (e.data?.agentId) setAgentId(e.data.agentId)
           if (e.data?.model) setModelName(e.data.model)
           break
         case 'chat_delta':
-          streamingRef.current = true
+          setStreaming(true)
+          setAwaiting(false)
           setMessages(m => {
             const last = m[m.length - 1]
             if (!last || last.role !== 'assistant') {
@@ -169,7 +198,7 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, runningHint
           break
         }
         case 'tool_result': {
-          streamingRef.current = false
+          setStreaming(false)
           setMessages(m => mergeToolResult(m, e.data?.tool ?? '', e.data?.content ?? ''))
           break
         }
@@ -178,7 +207,8 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, runningHint
           setCost(c => c + (e.data?.costIn ?? 0) + (e.data?.costOut ?? 0))
           break
         case 'chat_done':
-          streamingRef.current = false
+          setStreaming(false)
+          setAwaiting(false)
           setRunning(false)
           setMessages(m => {
             const settled = settleRunningCards(m)
@@ -229,7 +259,8 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, runningHint
           break
         }
         case 'chat_error':
-          streamingRef.current = false
+          setStreaming(false)
+          setAwaiting(false)
           setRunning(false)
           setMessages(m => [...settleRunningCards(m), { role: 'error', content: e.data?.message ?? '未知错误' }])
           break
@@ -265,7 +296,7 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, runningHint
   // 用户上翻阅读时不抢滚动位置；只有停在底部才跟随新消息
   useEffect(() => {
     if (atBottomRef.current) scrollToBottom()
-  }, [messages, pendingApprovals])
+  }, [messages, pendingApprovals, awaiting])
 
   const send = () => {
     const text = input.trim()
@@ -277,8 +308,10 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, runningHint
     setAtBottom(true)
     setMessages(m => [...m, { role: 'user', content: text }])
     setRunning(true)
+    setAwaiting(true)
     ChatService.SendMessage(activeId, text).catch(err => {
       setRunning(false)
+      setAwaiting(false)
       // 发送失败把草稿还回输入框（若用户已重新输入则不覆盖），方便直接重试
       setInput(prev => prev || text)
       setMessages(m => [...m, { role: 'error', content: String(err) }])
@@ -334,12 +367,14 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, runningHint
             return <AgentMessageCard key={i} msg={m.agentMsg} />
           }
           if (m.role === 'assistant') {
+            const isStreaming = streaming && i === messages.length - 1
             return (
-              <div key={i} className={`msg assistant${streamingRef.current && i === messages.length - 1 ? ' streaming' : ''}`}>
+              <div key={i} className={`msg assistant${isStreaming ? ' streaming' : ''}`}>
                 <div className="avatar">AI</div>
                 <div className="body">
                   <MarkdownBody content={m.content} />
                 </div>
+                {!isStreaming && m.content && <MessageCopyButton text={m.content} />}
               </div>
             )
           }
@@ -381,6 +416,15 @@ export default function ThreadPanel({ activeId, activeTitle, wsPath, runningHint
           }
           return <div key={i} className={`msg ${m.role}`}>{m.content}</div>
         })}
+        {awaiting && (
+          <div className="msg assistant thinking" role="status" aria-live="polite" aria-label="模型思考中">
+            <div className="avatar">AI</div>
+            <div className="body thinking-body">
+              <span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span>
+              <span className="thinking-label">思考中…</span>
+            </div>
+          </div>
+        )}
         {pendingApprovals.map(a => (
           <ApprovalCard
             key={a.id}

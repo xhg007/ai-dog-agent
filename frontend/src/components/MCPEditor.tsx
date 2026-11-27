@@ -30,19 +30,24 @@ function usesStdio(m: MCPItem): boolean {
 }
 
 // MCPEditor 全局 MCP 与项目专属 MCP 共用；测试连接独立于已建立的会话连接。
-export default function MCPEditor({ servers, onChange }: {
+export function newMCPServer(): MCPItem {
+  return {
+    id: crypto.randomUUID(), name: '新 MCP Server', transport: 'auto',
+    command: '', args: '', env: '', url: '', headers: '',
+    enabled: true, autoApproveReadOnly: false,
+  }
+}
+
+export default function MCPEditor({ servers, onChange, showAddButton = true }: {
   servers: MCPItem[]
   onChange: (next: MCPItem[]) => void
+  showAddButton?: boolean
 }) {
   const [test, setTest] = useState<Record<string, { loading?: boolean; tools?: string[]; error?: string }>>({})
   const update = (i: number, p: Partial<MCPItem>) =>
     onChange(servers.map((m, j) => j === i ? { ...m, ...p } : m))
   const remove = (i: number) => onChange(servers.filter((_, j) => j !== i))
-  const add = () => onChange([...servers, {
-    id: crypto.randomUUID(), name: '新 MCP Server', transport: 'auto',
-    command: '', args: '', env: '', url: '', headers: '',
-    enabled: true, autoApproveReadOnly: false,
-  }])
+  const add = () => onChange([...servers, newMCPServer()])
 
   const testMCP = async (m: MCPItem) => {
     setTest(s => ({ ...s, [m.id]: { loading: true } }))
@@ -67,7 +72,7 @@ export default function MCPEditor({ servers, onChange }: {
 
   return (
     <>
-      {servers.length === 0 && <p className="hint">暂无 MCP Server，点击下方「添加 MCP Server」。</p>}
+      {servers.length === 0 && <p className="hint">暂无 MCP Server。</p>}
       {servers.map((m, i) => (
         <div key={m.id} className="model-row">
           <div style={{ flex: 1 }}>
@@ -141,9 +146,11 @@ export default function MCPEditor({ servers, onChange }: {
           <div className="meta">{m.enabled ? '已启用' : '未启用'}</div>
         </div>
       ))}
-      <div className="row-actions">
-        <Button variant="secondary" size="sm" onClick={add}><Plus className="size-3.5" /> 添加 MCP Server</Button>
-      </div>
+      {showAddButton && (
+        <div className="row-actions">
+          <Button variant="secondary" size="sm" onClick={add}><Plus className="size-3.5" /> 添加 MCP Server</Button>
+        </div>
+      )}
     </>
   )
 }

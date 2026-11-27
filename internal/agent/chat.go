@@ -166,6 +166,45 @@ func (s *ChatService) ListSessions() []SessionInfo {
 	return list
 }
 
+// SessionObservation 观测台的会话快照（只读，不含消息历史）。
+type SessionObservation struct {
+	ID            string `json:"id"`
+	Title         string `json:"title"`
+	AgentID       string `json:"agentId"` // 主 Agent ID（事件归因用）
+	Model         string `json:"model"`   // 主模型显示名
+	Running       bool   `json:"running"`
+	CurrentTaskID string `json:"currentTaskId,omitempty"`
+	LastActive    int64  `json:"lastActive"` // Unix 毫秒
+}
+
+// ObserveSessions 返回所有会话的只读快照（观测台用），按最近活跃降序。
+func (s *ChatService) ObserveSessions() []SessionObservation {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	list := make([]SessionObservation, 0, len(s.sessions))
+	for _, sess := range s.sessions {
+		list = append(list, SessionObservation{
+			ID:            sess.id,
+			Title:         sess.title,
+			AgentID:       sess.agentID,
+			Model:         sess.modelName,
+			Running:       sess.running,
+			CurrentTaskID: sess.currentTaskID,
+			LastActive:    sess.lastActive.UnixMilli(),
+		})
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].LastActive > list[j].LastActive })
+	return list
+}
+
+// ObserveAgents 返回所有会话已注册子 Agent 的只读快照（观测台用）。
+func (s *ChatService) ObserveAgents() []AgentObservation {
+	if s.registry == nil {
+		return nil
+	}
+	return s.registry.ListAll()
+}
+
 // DeleteSession 删除线程；正在执行的先中断。
 func (s *ChatService) DeleteSession(sessionID string) bool {
 	s.mu.Lock()
@@ -326,7 +365,7 @@ func (s *ChatService) initAgentLocked(sess *chatSession) error {
 	// 带故障切换的模型链（FR-5.6）：激活模型优先，其余按配置顺序备用；
 	// 瞬态错误（网络/429/5xx/超时）自动切换并上报 model_fallback 事件
 	sessionID := sess.id
-	cm, modelName, modelCfg, err := llm.BuildModelChain(ctx, s.cfg, sess.agentID, sess.agentID,
+	chain, modelName, modelCfg, err := llm.BuildModelChain(ctx, s.cfg, sess.agentID, sess.agentID,
 		func(from, to, reason string) {
 			slog.Warn("模型故障切换", "session", sessionID, "from", from, "to", to, "reason", reason)
 			s.bus.Emit(eventbus.Event{Type: eventbus.EvModelFallback, SessionID: sessionID,
@@ -335,6 +374,8 @@ func (s *ChatService) initAgentLocked(sess *chatSession) error {
 	if err != nil {
 		return err
 	}
+	// 模型流实时旁路：token 生成过程中即推送到前端（ADK 的聚合交付不具实时性）
+	cm := llm.WithTapModel(chain)
 
 	prompt := s.buildPromptData()
 	// 项目 Agent 动态分派工具（每个 Spec 一个 dispatch_<name>）
@@ -604,12 +645,22 @@ func storedFromSchema(msgs []*schema.Message) []StoredMessage {
 	return out
 }
 
+// 流式旁路与 usage 采集的等待上限：超时只放弃等待，不阻塞对话终态。
+const (
+	deltaWaitTimeout = 5 * time.Second
+	usageWaitTimeout = 3 * time.Second
+)
+
 // runTurn 执行一轮对话：回放持久化历史，消费事件流并转发到前端，同时落盘消息。
 // 任务状态机：正常结束 → review → completed；用户中断 → cancelled；其余错误 → failed（FR-5.2）。
 func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
 	bus := s.bus
 	sessionID := sess.id
 	taskID := sess.currentTaskID
+	// 流式旁路：模型 token 实时推给前端（ADK 会在生成结束后才聚合交付，直接消费不具备实时性）
+	tap := newDeltaTap(bus, sessionID)
+	// 流式 usage 采集是异步的：收尾前等待，保证预算判定与统计完整
+	usageWait := &asyncWaiter{}
 
 	finishTask := func(status, errMsg string) {
 		if s.tasks != nil && taskID != "" {
@@ -623,6 +674,9 @@ func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
 		s.mu.Unlock()
 	}
 	emitError := func(msg string) {
+		// 先落完 usage 与已产出的增量，再推错误终态：统计完整且 delta 不晚于 error
+		usageWait.Wait(usageWaitTimeout)
+		tap.WaitTimeout(deltaWaitTimeout)
 		bus.Emit(eventbus.Event{Type: eventbus.EvChatError, SessionID: sessionID,
 			Data: map[string]string{"message": msg}})
 		s.appendMessages(sess, StoredMessage{Role: "error", Content: msg})
@@ -679,12 +733,12 @@ func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
 	}
 	snapshot := marshalMessages(stored)
 	// 观测上下文：会话/任务标识 + 消息快照 + 实际模型（用量归因）+ 执行计数器
-	runCtx := withObsInfo(approval.WithAgentID(execCtx, agentID), &obsInfo{
+	runCtx := llm.WithTap(withObsInfo(approval.WithAgentID(execCtx, agentID), &obsInfo{
 		SessionID: sessionID, TaskID: taskID, Snapshot: snapshot,
 		AgentID: agentID, ModelID: modelCfg.ID, ModelName: modelCfg.Name,
 		PriceIn: modelCfg.PriceIn, PriceOut: modelCfg.PriceOut,
-		Exec: exec,
-	})
+		Exec: exec, Usage: usageWait,
+	}), tap)
 	iter := exec.Run(runCtx, sess.runner, input)
 	var sb []byte
 	var usage schema.TokenUsage
@@ -760,17 +814,10 @@ func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
 					return
 				}
 				collectDelta(&sb, msg, &usage)
-				if msg.Content != "" {
-					bus.Emit(eventbus.Event{Type: eventbus.EvChatDelta, SessionID: sessionID,
-						Data: eventbus.ChatDeltaData{Delta: msg.Content}})
-				}
+				// delta 由 llm.WithTapModel 的旁路实时推送，这里不再重复发送
 			}
 		} else if mo.Message != nil {
 			collectDelta(&sb, mo.Message, &usage)
-			if mo.Message.Content != "" {
-				bus.Emit(eventbus.Event{Type: eventbus.EvChatDelta, SessionID: sessionID,
-					Data: eventbus.ChatDeltaData{Delta: mo.Message.Content}})
-			}
 		}
 	}
 
@@ -780,12 +827,16 @@ func (s *ChatService) runTurn(ctx context.Context, sess *chatSession) {
 		finishTask(store.StatusCancelled, "用户中断")
 		return
 	}
+	// 等待流式 usage 副本读完：AddLLM 的预算判定需要完整用量，否则最后一次调用的
+	// token 会晚于终止检查到达，预算超限无法在当轮生效。
+	usageWait.Wait(usageWaitTimeout)
 	// 超时/超限也可能表现为迭代器正常结束：以执行计数器的终止原因为准
 	if err := exec.Termination(execCtx); err != nil {
 		finishLimited(err)
 		return
 	}
 
+	tap.WaitTimeout(deltaWaitTimeout) // 先推完所有增量，再发完成事件
 	bus.Emit(eventbus.Event{Type: eventbus.EvChatDone, SessionID: sessionID,
 		Data: eventbus.ChatDoneData{
 			Content:          string(sb),

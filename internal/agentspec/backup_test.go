@@ -96,7 +96,7 @@ func TestRestoreRejectsOutsidePath(t *testing.T) {
 	if err := Save(root, Spec{Name: "coder", SystemPrompt: "x"}); err != nil {
 		t.Fatal(err)
 	}
-	outside := filepath.Join(t.TempDir(), "coder-20200101-000000.000000000.json")
+	outside := filepath.Join(t.TempDir(), "coder-20200101-000000.000000000.yml")
 	if err := os.WriteFile(outside, []byte(`{"name":"coder","system_prompt":"x"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}

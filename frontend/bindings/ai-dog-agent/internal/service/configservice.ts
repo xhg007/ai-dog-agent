@@ -25,6 +25,14 @@ export function DeleteProjectAgent(name: string): $CancellablePromise<void> {
 }
 
 /**
+ * DetectProviderModels 调用供应商的 GET /models（OpenAI 兼容），返回可用模型 ID（去重排序）。
+ * 只读探测，不修改配置；前端让用户勾选后再加入模型列表。
+ */
+export function DetectProviderModels(providerID: string): $CancellablePromise<string[] | null> {
+    return $Call.ByID(2985903491, providerID);
+}
+
+/**
  * GetConfig 返回当前配置（含模型 / Skills / MCP Server）。
  * ShellWhitelist 为空时填充默认白名单，保证前端设置页展示生效值。
  */
@@ -96,7 +104,9 @@ export function RestoreProjectAgent(name: string, backupPath: string): $Cancella
 }
 
 /**
- * SaveConfig 保存配置（含校验：模型字段/ID 唯一/activeModelId 有效性）。
+ * SaveConfig 保存设置页配置（模型 / Skills / MCP / 白名单等）。
+ * 工作区与项目信任状态由 WorkspaceService / TrustProject 单独维护，设置页不编辑；
+ * 前端全量保存时这些字段会缺失，这里保留现有值，避免被空值覆盖。
  */
 export function SaveConfig(cfg: config$0.Config): $CancellablePromise<void> {
     return $Call.ByID(895594508, cfg);

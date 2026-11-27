@@ -2,7 +2,7 @@ package agentspec
 
 import "testing"
 
-// Agent 名称会直接作为 .aidog/agents/<name>.json 的文件名，
+// Agent 名称会直接作为 .aidog/agents/<name>.yml 的文件名，
 // 非法字符与 Windows 保留名必须在保存前给出可读错误。
 func TestValidateNameRejectsWindowsInvalid(t *testing.T) {
 	bad := []string{

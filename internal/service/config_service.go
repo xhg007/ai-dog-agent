@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"ai-dog-agent/internal/agentspec"
 	"ai-dog-agent/internal/config"
@@ -30,8 +31,20 @@ func (c *ConfigService) GetConfig() config.Config {
 	return cfg
 }
 
-// SaveConfig 保存配置（含校验：模型字段/ID 唯一/activeModelId 有效性）。
+// SaveConfig 保存设置页配置（模型 / Skills / MCP / 白名单等）。
+// 工作区与项目信任状态由 WorkspaceService / TrustProject 单独维护，设置页不编辑；
+// 前端全量保存时这些字段会缺失，这里保留现有值，避免被空值覆盖。
 func (c *ConfigService) SaveConfig(cfg config.Config) error {
+	current := c.mgr.Get()
+	if strings.TrimSpace(cfg.WorkspacePath) == "" {
+		cfg.WorkspacePath = current.WorkspacePath
+	}
+	if cfg.TrustedProjects == nil {
+		cfg.TrustedProjects = current.TrustedProjects
+	}
+	if cfg.BlockedProjects == nil {
+		cfg.BlockedProjects = current.BlockedProjects
+	}
 	return c.mgr.Save(cfg)
 }
 

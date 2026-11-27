@@ -13,21 +13,25 @@ export interface SkillItem {
   enabled: boolean
 }
 
+// 新建 Skill 的默认值：页面标题栏的「添加 Skill」按钮也复用它。
+export function newSkill(): SkillItem {
+  return { id: crypto.randomUUID(), name: '新 Skill', description: '', prompt: '', enabled: true }
+}
+
 // SkillEditor 全局 Skill 与项目专属 Skill 共用。
-export default function SkillEditor({ skills, onChange }: {
+export default function SkillEditor({ skills, onChange, showAddButton = true }: {
   skills: SkillItem[]
   onChange: (next: SkillItem[]) => void
+  showAddButton?: boolean
 }) {
   const update = (i: number, p: Partial<SkillItem>) =>
     onChange(skills.map((s, j) => j === i ? { ...s, ...p } : s))
   const remove = (i: number) => onChange(skills.filter((_, j) => j !== i))
-  const add = () => onChange([...skills, {
-    id: crypto.randomUUID(), name: '新 Skill', description: '', prompt: '', enabled: true,
-  }])
+  const add = () => onChange([...skills, newSkill()])
 
   return (
     <>
-      {skills.length === 0 && <p className="hint">暂无 Skill，点击下方「添加 Skill」。</p>}
+      {skills.length === 0 && <p className="hint">暂无 Skill。</p>}
       {skills.map((s, i) => (
         <div key={s.id} className="model-row">
           <div style={{ flex: 1 }}>
@@ -57,9 +61,11 @@ export default function SkillEditor({ skills, onChange }: {
           <div className="meta">{s.enabled ? '已启用' : '未启用'}</div>
         </div>
       ))}
-      <div className="row-actions">
-        <Button variant="secondary" size="sm" onClick={add}><Plus className="size-3.5" /> 添加 Skill</Button>
-      </div>
+      {showAddButton && (
+        <div className="row-actions">
+          <Button variant="secondary" size="sm" onClick={add}><Plus className="size-3.5" /> 添加 Skill</Button>
+        </div>
+      )}
     </>
   )
 }

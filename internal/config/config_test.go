@@ -8,7 +8,7 @@ import (
 
 func TestManagerSaveLoadRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "config.json")
+	path := filepath.Join(dir, "config.yml")
 
 	m := &Manager{path: path}
 	m.cfg = defaultConfig()
@@ -55,7 +55,7 @@ func TestActiveModelNotConfigured(t *testing.T) {
 
 func TestSkillsAndMCPServersRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	m := &Manager{path: filepath.Join(dir, "config.json")}
+	m := &Manager{path: filepath.Join(dir, "config.yml")}
 	m.cfg = defaultConfig()
 
 	cfg := m.Get()
@@ -66,13 +66,13 @@ func TestSkillsAndMCPServersRoundTrip(t *testing.T) {
 	cfg.MCPServers = []MCPServerConfig{{
 		ID: "mcp-1", Name: "本地文件系统", Command: "npx",
 		Args: []string{"-y", "@modelcontextprotocol/server-filesystem"},
-		Env: "ROOT=/workspace\nDEBUG=0", Enabled: true,
+		Env:  "ROOT=/workspace\nDEBUG=0", Enabled: true,
 	}}
 	if err := m.Save(cfg); err != nil {
 		t.Fatalf("Save 失败: %v", err)
 	}
 
-	m2 := &Manager{path: filepath.Join(dir, "config.json")}
+	m2 := &Manager{path: filepath.Join(dir, "config.yml")}
 	if err := m2.load(); err != nil {
 		t.Fatalf("重新加载失败: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestGetReturnsIndependentCopyOfNewSlices(t *testing.T) {
 // --- Shell 白名单（M4 FR-4.2） ---
 
 func TestDefaultShellWhitelist(t *testing.T) {
-	m := &Manager{path: filepath.Join(t.TempDir(), "config.json")}
+	m := &Manager{path: filepath.Join(t.TempDir(), "config.yml")}
 	m.cfg = defaultConfig()
 	got := m.ShellWhitelist()
 	want := []string{"go", "git", "dir", "ls"}
@@ -119,7 +119,7 @@ func TestDefaultShellWhitelist(t *testing.T) {
 
 func TestShellWhitelist_FallbackAndSave(t *testing.T) {
 	dir := t.TempDir()
-	m := &Manager{path: filepath.Join(dir, "config.json")}
+	m := &Manager{path: filepath.Join(dir, "config.yml")}
 	m.cfg = defaultConfig()
 
 	// 用户配置了空列表 → 回退默认值
@@ -132,7 +132,7 @@ func TestShellWhitelist_FallbackAndSave(t *testing.T) {
 	if err := m.Save(cfg); err != nil {
 		t.Fatalf("Save 失败: %v", err)
 	}
-	m2 := &Manager{path: filepath.Join(dir, "config.json")}
+	m2 := &Manager{path: filepath.Join(dir, "config.yml")}
 	if err := m2.load(); err != nil {
 		t.Fatalf("重新加载失败: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestCloneShellWhitelistIndependent(t *testing.T) {
 // TestSaveValidation 保存前校验：模型字段缺失、ID 重复、ActiveModelID 悬空均被拒。
 func TestSaveValidation(t *testing.T) {
 	newMgr := func() *Manager {
-		return &Manager{path: filepath.Join(t.TempDir(), "config.json"), cfg: defaultConfig()}
+		return &Manager{path: filepath.Join(t.TempDir(), "config.yml"), cfg: defaultConfig()}
 	}
 	cases := []struct {
 		name string
@@ -185,9 +185,10 @@ func TestSaveValidation(t *testing.T) {
 		t.Fatalf("空配置应允许保存: %v", err)
 	}
 }
+
 // TestVersionIncrementsOnSave 配置版本随成功保存递增，非法保存不递增。
 func TestVersionIncrementsOnSave(t *testing.T) {
-	m := &Manager{path: filepath.Join(t.TempDir(), "config.json"), cfg: defaultConfig()}
+	m := &Manager{path: filepath.Join(t.TempDir(), "config.yml"), cfg: defaultConfig()}
 	if v := m.Version(); v != 0 {
 		t.Fatalf("初始版本应为 0，got %d", v)
 	}
@@ -210,10 +211,11 @@ func TestVersionIncrementsOnSave(t *testing.T) {
 		t.Fatalf("再次保存后版本应为 2，got %d", v)
 	}
 }
+
 // TestMCPValidation MCP 连接字段校验：transport/command/url/headers。
 func TestMCPValidation(t *testing.T) {
 	newMgr := func() *Manager {
-		return &Manager{path: filepath.Join(t.TempDir(), "config.json"), cfg: defaultConfig()}
+		return &Manager{path: filepath.Join(t.TempDir(), "config.yml"), cfg: defaultConfig()}
 	}
 	bad := []struct {
 		name string

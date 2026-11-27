@@ -2,13 +2,14 @@ version: '3'
 
 tasks:
   go:mod:tidy:
-    summary: Runs `go mod tidy`
+    summary: Disabled - go.mod is maintained manually (DuckDB dynamic-lib mode)
     internal: true
-    # Universal/multi-arch builds invoke this concurrently from parallel deps;
-    # two `go mod tidy` processes racing on go.mod can corrupt it (#4637).
+    # 项目固定使用 DuckDB 动态库模式（-tags=duckdb_use_lib），go.mod 不再包含各平台预编译静态库。
+    # `go mod tidy` / `go mod vendor` 会把 go.duckdb.org/libduckdb/* 重新写回（约 750MB），
+    # 因此构建流程不再自动 tidy；新增依赖时手工维护 go.mod。
     run: once
     cmds:
-      - go mod tidy
+      - 'echo "skip go mod tidy (DuckDB dynamic-lib mode; go.mod is maintained manually)"'
 
   install:frontend:deps:
     summary: Install frontend dependencies

@@ -23,9 +23,9 @@ const (
 
 // ProjectStatus 项目配置状态与审计报告。
 type ProjectStatus struct {
-	Root   string             `json:"root"`
-	Status ProjectTrustStatus `json:"status"`
-	Audit  AuditReport        `json:"audit"`
+	Root   string             `json:"root" yaml:"root"`
+	Status ProjectTrustStatus `json:"status" yaml:"status"`
+	Audit  AuditReport        `json:"audit" yaml:"audit"`
 }
 
 // NormalizeProjectPath 规范化项目根：绝对路径 + Clean + Windows 小写。

@@ -181,7 +181,7 @@ func buildSmithPrompt(in *SmithInput) (string, string, error) {
 	system := `你是 ai-dog-agent 的后台优化 Agent（agent-smith），负责根据失败/中断任务与现有配置优化项目级 work agent。
 
 约束：
-1. 只允许新增或修改一个 work agent（.aidog/agents/*.json），不得修改全局配置或主 Agent。
+1. 只允许新增或修改一个 work agent（.aidog/agents/*.yml），不得修改全局配置或主 Agent。
 2. tools 只能从以下列表选择：` + strings.Join(tools.KnownToolNames(), ", ") + `。
 3. model 必须是现有模型配置的 ID/Name/Model；不确定时留空（跟随主模型）。
 4. 不得编造不存在的 Skill/MCP；不确定时留空。
@@ -515,7 +515,7 @@ func (s *Smith) applyProposal(ctx context.Context, tr SmithTrigger, in *SmithInp
 			break
 		}
 	}
-	rel := filepath.Join(".aidog", "agents", p.Spec.Name+".json")
+	rel := filepath.Join(".aidog", "agents", p.Spec.Name+".yml")
 	ok, err := s.appr.RequestContext(ctx, tr.SessionID, "agent_smith", rel, smithPreview(old, p))
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrSmithRejected, err)

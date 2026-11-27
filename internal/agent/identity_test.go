@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"ai-dog-agent/internal/agentspec"
+	"ai-dog-agent/internal/config"
 )
 
 func TestAgentIDForFollowsProject(t *testing.T) {
@@ -20,9 +21,10 @@ func TestAgentIDForFollowsProject(t *testing.T) {
 	if id2 := agentIDFor(proj, t.TempDir()); id2 != id1 {
 		t.Fatalf("同一项目 ID 应稳定: %q != %q", id2, id1)
 	}
-	// 已固化到项目文件
-	if b, err := os.ReadFile(agentspec.AgentIDFile(proj)); err != nil || string(b) != id1 {
-		t.Fatalf("项目 agent_id 文件不符: %s, %v", b, err)
+	// 已固化到 main.yml
+	pc, err := config.LoadProject(proj)
+	if err != nil || pc.Main.AgentID != id1 {
+		t.Fatalf("main.yml 中的 agent_id 不符: %+v, %v", pc, err)
 	}
 	// 不同项目不同 ID
 	if id3 := agentIDFor(t.TempDir(), t.TempDir()); id3 == id1 {

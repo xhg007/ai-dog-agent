@@ -25,7 +25,9 @@ tasks:
         vars:
           ARCH: '{{.ARCH}}'
           DEV: '{{.DEV}}'
-          EXTRA_TAGS: '{{.EXTRA_TAGS}}'
+          # 与 wails3 传入的 tags（如 mcp）合并，不能直接覆盖：
+          # 覆盖会丢掉 duckdb_use_lib，导致静态库与 -lduckdb 重复定义、链接失败
+          EXTRA_TAGS: '{{ if not .EXTRA_TAGS }}duckdb_use_lib{{ else if contains "duckdb_use_lib" .EXTRA_TAGS }}{{ .EXTRA_TAGS }}{{ else }}{{ .EXTRA_TAGS }},duckdb_use_lib{{ end }}'
           OBFUSCATED: '{{.OBFUSCATED}}'
           GARBLE_ARGS: '{{.GARBLE_ARGS}}'
     vars:

@@ -88,7 +88,7 @@ func TestSaveLoadProject(t *testing.T) {
 	if err := SaveProject(root, pc); err != nil {
 		t.Fatalf("SaveProject: %v", err)
 	}
-	for _, name := range []string{"main.json", "mcp_servers.json", "skills.json"} {
+	for _, name := range []string{"main.yml", "mcp_servers.yml", "skills.yml"} {
 		if _, err := os.Stat(filepath.Join(ProjectDir(root), name)); err != nil {
 			t.Fatalf("缺少 %s: %v", name, err)
 		}
@@ -98,17 +98,17 @@ func TestSaveLoadProject(t *testing.T) {
 		t.Fatalf("LoadProject: %v", err)
 	}
 	if got.Main.Model != "coder" || len(got.Main.Tools) != 2 {
-		t.Fatalf("main.json 回读不符: %+v", got.Main)
+		t.Fatalf("main.yml 回读不符: %+v", got.Main)
 	}
 	if len(got.Skills) != 1 || got.Skills[0].ID != "p1" {
-		t.Fatalf("skills.json 回读不符: %+v", got.Skills)
+		t.Fatalf("skills.yml 回读不符: %+v", got.Skills)
 	}
 	if len(got.MCPServers) != 1 || got.MCPServers[0].ID != "p2" {
-		t.Fatalf("mcp_servers.json 回读不符: %+v", got.MCPServers)
+		t.Fatalf("mcp_servers.yml 回读不符: %+v", got.MCPServers)
 	}
 }
 
-// TestManagerEffective 合并视图生效，项目配置不写入全局 config.json。
+// TestManagerEffective 合并视图生效，项目配置不写入全局 config.yml。
 func TestManagerEffective(t *testing.T) {
 	dir := t.TempDir()
 	m, err := NewManagerAt(dir)
@@ -142,12 +142,12 @@ func TestManagerEffective(t *testing.T) {
 	if len(m.Get().Skills) != 1 || m.Get().Project != nil {
 		t.Fatalf("全局配置被项目配置污染: %+v", m.Get())
 	}
-	data, err := os.ReadFile(filepath.Join(dir, "config.json"))
+	data, err := os.ReadFile(filepath.Join(dir, "config.yml"))
 	if err != nil {
-		t.Fatalf("读取 config.json: %v", err)
+		t.Fatalf("读取 config.yml: %v", err)
 	}
 	if strings.Contains(string(data), `"Project"`) || strings.Contains(string(data), `"project"`) {
-		t.Fatalf("项目视图不应写入全局 config.json: %s", data)
+		t.Fatalf("项目视图不应写入全局 config.yml: %s", data)
 	}
 	// 无工作区时直接返回全局配置
 	if eff := m.Effective(""); len(eff.Skills) != 1 || eff.Project != nil {

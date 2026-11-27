@@ -38,6 +38,10 @@ type obsInfo struct {
 
 	// Exec 本次执行的资源计数器（步骤/工具/Token/成本上限）；nil 时不限流。
 	Exec *Execution
+
+	// Usage 等待流式 usage 采集完成：runTurn 在终止判定前等待，
+	// 保证最后一次模型调用的 token 能触发当轮预算超限。
+	Usage *asyncWaiter
 }
 
 type obsKey struct{}
@@ -103,28 +107,44 @@ func newObsHandler(tasks *task.Manager) callbacks.Handler {
 	})
 
 	// ---- ChatModel：流式结束 ----
-	// 框架已为每个 handler 复制独立流副本（inject.go OnWithStreamHandle），
-	// 本 handler 可同步消费到底，不影响主转发链路。
+	// 框架为每个 handler 复制独立流副本（inject.go OnWithStreamHandle），
+	// 但该回调是同步调用的：在这里循环读到 EOF 会把模型 Stream() 阻塞到生成结束，
+	// 导致下游（tap/ADK）只能一次性拿到全部 token。因此改为异步消费副本：
+	// handler 立即返回，流式链路保持实时；usage 在副本读完后补记。
 	b.OnEndWithStreamOutputFn(func(ctx context.Context, info *callbacks.RunInfo,
 		output *schema.StreamReader[callbacks.CallbackOutput]) context.Context {
 		if info == nil || info.Component != components.ComponentOfChatModel {
 			return ctx
 		}
-		var usage *model.TokenUsage
-		for {
-			chunk, err := output.Recv()
-			if err != nil {
-				break // EOF 或错误：以最后拿到的 usage 为准
-			}
-			if mo := model.ConvCallbackOutput(chunk); mo != nil && mo.TokenUsage != nil {
-				usage = mo.TokenUsage
-			}
-		}
 		oi := obsFromCtx(ctx)
-		if oi != nil && oi.Exec != nil {
-			oi.Exec.AddLLM(usage, oi.PriceIn, oi.PriceOut)
+		var waiter *asyncWaiter
+		if oi != nil {
+			waiter = oi.Usage
 		}
-		recordModelUsage(tasks, oi, info, usage)
+		// Add 必须在启动 goroutine 前完成：runTurn 的 Wait 不能漏掉本次采集
+		if waiter != nil {
+			waiter.Add()
+		}
+		go func() {
+			defer output.Close()
+			if waiter != nil {
+				defer waiter.Done()
+			}
+			var usage *model.TokenUsage
+			for {
+				chunk, err := output.Recv()
+				if err != nil {
+					break // EOF 或错误：以最后拿到的 usage 为准
+				}
+				if mo := model.ConvCallbackOutput(chunk); mo != nil && mo.TokenUsage != nil {
+					usage = mo.TokenUsage
+				}
+			}
+			if oi != nil && oi.Exec != nil {
+				oi.Exec.AddLLM(usage, oi.PriceIn, oi.PriceOut)
+			}
+			recordModelUsage(tasks, oi, info, usage)
+		}()
 		return ctx
 	})
 

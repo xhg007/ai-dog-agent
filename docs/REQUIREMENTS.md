@@ -60,8 +60,8 @@ ai-dog-agent 是一个运行在用户桌面上的 AI 编码 Agent 工具：用�
 | 角色 | 职责 | 配置来源 | 上下文 |
 |---|---|---|---|
 | **主 Agent（Orchestrator）** | 软件启动时常驻；理解用户意图、制定计划、编排与分派子 Agent；汇总结果 | 应用级配置 + 稳定前缀系统提示词 | 独立上下文（任务级会话） |
-| **子 Agent（项目级）** | 执行具体工作（探索/编码/修复/自定义）；各有独立的上下文、skill、MCP 连接、function call 工具集 | **随项目走**：workspace 内 `.aidog/agents/*.json` | 完全独立（不共享主 Agent 历史） |
-| **后台 Meta Agent（agent-smith）** | 默认后台运行；负责**优化与创造子 Agent**（分析任务表现，生成/修改 `.aidog/agents/*.json`）；写操作走审批 | 应用级固定提示词 | 独立上下文 |
+| **子 Agent（项目级）** | 执行具体工作（探索/编码/修复/自定义）；各有独立的上下文、skill、MCP 连接、function call 工具集 | **随项目走**：workspace 内 `.aidog/agents/*.yml` | 完全独立（不共享主 Agent 历史） |
+| **后台 Meta Agent（agent-smith）** | 默认后台运行；负责**优化与创造子 Agent**（分析任务表现，生成/修改 `.aidog/agents/*.yml`）；写操作走审批 | 应用级固定提示词 | 独立上下文 |
 
 约束：
 
@@ -77,7 +77,7 @@ ai-dog-agent/
 ├── internal/
 │   ├── config/                # 应用配置（模型、审批策略、白名单），JSON 存于用户目录
 │   ├── workspace/             # workspace 管理：注册、校验、路径安全（逃逸检查）
-│   ├── agentspec/             # 子 Agent 配置读写：workspace/.aidog/agents/*.json（Schema 校验）
+│   ├── agentspec/             # 子 Agent 配置读写：workspace/.aidog/agents/*.yml（Schema 校验）
 │   ├── tools/                 # Agent 工具实现（eino tool.InvokableTool）
 │   │   ├── fs.go              #   read_file / write_file / edit_file / list_files
 │   │   ├── search.go          #   search_code（字面 + 正则）

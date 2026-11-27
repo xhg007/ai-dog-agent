@@ -15,5 +15,6 @@ export type {
     ProjectConfig,
     ProjectMain,
     ProjectStatus,
+    ProviderConfig,
     SkillConfig
 } from "./models.js";

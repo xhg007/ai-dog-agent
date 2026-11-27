@@ -21,7 +21,7 @@ func TestSaveListRoundTrip(t *testing.T) {
 	if err := Save(root, want); err != nil {
 		t.Fatalf("Save 失败: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".aidog", "agents", "reviewer.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, ".aidog", "agents", "reviewer.yml")); err != nil {
 		t.Fatalf("配置文件未落盘: %v", err)
 	}
 

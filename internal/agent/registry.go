@@ -12,6 +12,7 @@ package agent
 import (
 	"context"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -144,4 +145,43 @@ func (r *Registry) Count(sessionID string) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.sessions[sessionID])
+}
+
+// AgentObservation 观测台展示的子 Agent 快照（只读，不含私聊历史与运行上下文）。
+type AgentObservation struct {
+	SessionID string `json:"sessionId"`
+	AgentID   string `json:"agentId"`
+	Name      string `json:"name"`
+	Model     string `json:"model"`
+	ModelID   string `json:"modelId,omitempty"`
+	Tool      string `json:"tool"` // dispatch_<name>，前端用它关联 tool_call/tool_result
+}
+
+// ListAll 返回所有会话已注册的子 Agent 快照，按会话、名称、agentId 排序。
+func (r *Registry) ListAll() []AgentObservation {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]AgentObservation, 0)
+	for sessionID, m := range r.sessions {
+		for _, as := range m {
+			out = append(out, AgentObservation{
+				SessionID: sessionID,
+				AgentID:   as.spec.AgentID,
+				Name:      as.spec.Name,
+				Model:     as.model.Name,
+				ModelID:   as.model.ID,
+				Tool:      DispatchToolName(as.spec),
+			})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].SessionID != out[j].SessionID {
+			return out[i].SessionID < out[j].SessionID
+		}
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].AgentID < out[j].AgentID
+	})
+	return out
 }

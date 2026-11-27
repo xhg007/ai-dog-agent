@@ -204,3 +204,37 @@ func TestObsHandler_StreamUsage(t *testing.T) {
 		t.Fatalf("流式 usage 落库不符: %+v", rows)
 	}
 }
+
+// TestObsHandler_StreamUsageWaiter 流式 usage 异步采集可被等待：
+// 等待完成后执行计数器已累计 token，预算超限能在当轮终止。
+func TestObsHandler_StreamUsageWaiter(t *testing.T) {
+	m, _, _, cleanup := newObsTestEnv(t)
+	defer cleanup()
+	h := newObsHandler(m)
+
+	taskID, _ := m.Start("s1", "t")
+	exec, _, cancel := StartExecution(context.Background(), Limits{MaxTokens: 10})
+	defer cancel()
+	waiter := &asyncWaiter{}
+	ctx := withObsInfo(context.Background(), &obsInfo{
+		SessionID: "s1", TaskID: taskID, Snapshot: "[]", Exec: exec, Usage: waiter,
+	})
+	info := &callbacks.RunInfo{Name: "chat", Type: "OpenAI", Component: components.ComponentOfChatModel}
+
+	sr, sw := schema.Pipe[callbacks.CallbackOutput](1)
+	sw.Send(&model.CallbackOutput{TokenUsage: &model.TokenUsage{
+		PromptTokens: 50, CompletionTokens: 10, TotalTokens: 60,
+	}}, nil)
+	sw.Close()
+	h.OnEndWithStreamOutput(ctx, info, sr)
+
+	if !waiter.Wait(2 * time.Second) {
+		t.Fatal("usage 采集未在超时内完成")
+	}
+	if got := exec.Snapshot().Tokens; got != 60 {
+		t.Fatalf("Token 累计 = %d，期望 60", got)
+	}
+	if err := exec.Termination(context.Background()); err == nil {
+		t.Fatal("超过 MaxTokens 后应在当轮终止")
+	}
+}

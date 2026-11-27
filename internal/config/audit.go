@@ -5,10 +5,11 @@ package config
 // 自动拉黑。注意：这是启发式规则，不保证查杀所有后门/病毒，仅作第一道防线。
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 
 	"ai-dog-agent/internal/agentspec"
 )
@@ -24,19 +25,19 @@ const (
 
 // AuditFinding 一条审计发现。
 type AuditFinding struct {
-	Severity Severity `json:"severity"`
-	Rule     string   `json:"rule"`
-	File     string   `json:"file"`
-	Evidence string   `json:"evidence"`
+	Severity Severity `json:"severity" yaml:"severity"`
+	Rule     string   `json:"rule" yaml:"rule"`
+	File     string   `json:"file" yaml:"file"`
+	Evidence string   `json:"evidence" yaml:"evidence"`
 }
 
 // AuditReport 审计结果汇总。
 type AuditReport struct {
-	Findings    []AuditFinding `json:"findings"`
-	HighCount   int            `json:"highCount"`
-	MediumCount int            `json:"mediumCount"`
-	LowCount    int            `json:"lowCount"`
-	Blocked     bool           `json:"blocked"` // 存在高危即应自动拉黑
+	Findings    []AuditFinding `json:"findings" yaml:"findings"`
+	HighCount   int            `json:"highCount" yaml:"highCount"`
+	MediumCount int            `json:"mediumCount" yaml:"mediumCount"`
+	LowCount    int            `json:"lowCount" yaml:"lowCount"`
+	Blocked     bool           `json:"blocked" yaml:"blocked"` // 存在高危即应自动拉黑
 }
 
 const maxAuditFileSize = 1 << 20 // 单文件最多扫描 1MB
@@ -109,14 +110,14 @@ func AuditProject(root string) AuditReport {
 	}
 	dir := ProjectDir(root)
 	files := []string{
-		filepath.Join(dir, "main.json"),
-		filepath.Join(dir, "mcp_servers.json"),
-		filepath.Join(dir, "skills.json"),
+		projectConfigPath(dir, "main"),
+		projectConfigPath(dir, "mcp_servers"),
+		projectConfigPath(dir, "skills"),
 	}
 	agentDir := agentspec.Dir(root)
 	if entries, err := os.ReadDir(agentDir); err == nil {
 		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			if e.IsDir() || !hasConfigExt(e.Name()) {
 				continue
 			}
 			files = append(files, filepath.Join(agentDir, e.Name()))
@@ -165,20 +166,20 @@ func (r *AuditReport) add(sev Severity, rule, file, evidence string) {
 
 // addMCPURLFindings 检查项目 MCP Server 是否使用明文 HTTP。
 func (r *AuditReport) addMCPURLFindings(root string) {
-	path := filepath.Join(ProjectDir(root), "mcp_servers.json")
+	path := projectConfigPath(ProjectDir(root), "mcp_servers")
 	data, err := os.ReadFile(path)
 	if err != nil || len(data) > maxAuditFileSize {
 		return
 	}
 	var servers []MCPServerConfig
-	if json.Unmarshal(data, &servers) != nil {
+	if yaml.Unmarshal(data, &servers) != nil {
 		return
 	}
+	rel := filepath.Join(".aidog", filepath.Base(path))
 	for _, s := range servers {
 		u := strings.ToLower(strings.TrimSpace(s.URL))
 		if strings.HasPrefix(u, "http://") {
-			r.add(SeverityMedium, "insecure_mcp", filepath.Join(".aidog", "mcp_servers.json"),
-				s.Name+" -> "+s.URL)
+			r.add(SeverityMedium, "insecure_mcp", rel, s.Name+" -> "+s.URL)
 		}
 	}
 }
@@ -190,11 +191,11 @@ func (r *AuditReport) addAgentRefFindings(root string) {
 	if err != nil {
 		return
 	}
-	localSkills := loadSkillRefs(filepath.Join(ProjectDir(root), "skills.json"))
-	localMCP := loadMCPRefs(filepath.Join(ProjectDir(root), "mcp_servers.json"))
+	localSkills := loadSkillRefs(projectConfigPath(ProjectDir(root), "skills"))
+	localMCP := loadMCPRefs(projectConfigPath(ProjectDir(root), "mcp_servers"))
 
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+		if e.IsDir() || !hasConfigExt(e.Name()) {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(agentDir, e.Name()))
@@ -202,7 +203,7 @@ func (r *AuditReport) addAgentRefFindings(root string) {
 			continue
 		}
 		var spec agentspec.Spec
-		if json.Unmarshal(data, &spec) != nil {
+		if yaml.Unmarshal(data, &spec) != nil {
 			continue
 		}
 		rel := filepath.Join(".aidog", "agents", e.Name())
@@ -231,7 +232,7 @@ func loadSkillRefs(path string) map[string]bool {
 		return nil
 	}
 	var skills []SkillConfig
-	if json.Unmarshal(data, &skills) != nil {
+	if yaml.Unmarshal(data, &skills) != nil {
 		return nil
 	}
 	out := make(map[string]bool, len(skills)*2)
@@ -252,7 +253,7 @@ func loadMCPRefs(path string) map[string]bool {
 		return nil
 	}
 	var servers []MCPServerConfig
-	if json.Unmarshal(data, &servers) != nil {
+	if yaml.Unmarshal(data, &servers) != nil {
 		return nil
 	}
 	out := make(map[string]bool, len(servers)*2)
@@ -265,6 +266,24 @@ func loadMCPRefs(path string) map[string]bool {
 		}
 	}
 	return out
+}
+
+// projectConfigPath 返回项目配置文件的现有路径：优先 .yml，兼容旧 .json。
+func projectConfigPath(dir, base string) string {
+	yml := filepath.Join(dir, base+".yml")
+	if _, err := os.Stat(yml); err == nil {
+		return yml
+	}
+	legacy := filepath.Join(dir, base+".json")
+	if _, err := os.Stat(legacy); err == nil {
+		return legacy
+	}
+	return yml
+}
+
+// hasConfigExt 判断是否为项目配置/Agent 配置文件（.yml；兼容旧 .json）。
+func hasConfigExt(name string) bool {
+	return strings.HasSuffix(name, ".yml") || strings.HasSuffix(name, ".json")
 }
 
 func truncateEvidence(s string) string {

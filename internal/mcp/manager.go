@@ -26,6 +26,7 @@ import (
 
 	"ai-dog-agent/internal/approval"
 	"ai-dog-agent/internal/config"
+	"ai-dog-agent/internal/winproc"
 )
 
 const (
@@ -320,6 +321,8 @@ func dial(ctx context.Context, cfg config.MCPServerConfig, workdir string) (*ser
 		if workdir != "" {
 			cmd.Dir = workdir
 		}
+		// GUI 进程没有控制台：MCP stdio 启动器（npx/uvx 等）不分配可见窗口
+		winproc.HideConsole(cmd)
 		if env := parseEnv(cfg.Env); len(env) > 0 {
 			cmd.Env = append(os.Environ(), env...)
 		}

@@ -52,6 +52,20 @@ export function NewSession(): $CancellablePromise<string> {
 }
 
 /**
+ * ObserveAgents 返回所有会话已注册子 Agent 的只读快照（观测台用）。
+ */
+export function ObserveAgents(): $CancellablePromise<$models.AgentObservation[] | null> {
+    return $Call.ByID(1974030705);
+}
+
+/**
+ * ObserveSessions 返回所有会话的只读快照（观测台用），按最近活跃降序。
+ */
+export function ObserveSessions(): $CancellablePromise<$models.SessionObservation[] | null> {
+    return $Call.ByID(3951806482);
+}
+
+/**
  * OptimizeAgents 手动触发 agent-smith（异步）。启动前校验工作区、会话与忙碌状态。
  */
 export function OptimizeAgents(sessionID: string): $CancellablePromise<void> {

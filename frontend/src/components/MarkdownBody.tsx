@@ -9,6 +9,7 @@ import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
 import rehypeHighlight from 'rehype-highlight'
 import rehypeKatex from 'rehype-katex'
 import MermaidDiagram from './MermaidDiagram'
+import { copyText } from '../lib/clipboard'
 
 // rehype-sanitize 默认会清掉 remark-math 生成的 class，
 // 这里放行 math 标记，KaTeX 再把它转换成公式 HTML。
@@ -33,27 +34,7 @@ function CodeBlock({ children, ...props }: React.HTMLAttributes<HTMLPreElement>)
 
   const copy = async () => {
     const text = ref.current?.innerText ?? ''
-    if (!text) return
-    let ok = true
-    try {
-      await navigator.clipboard.writeText(text)
-    } catch {
-      // 部分 WebView 环境没有 Clipboard API，退回 execCommand
-      try {
-        const ta = document.createElement('textarea')
-        ta.value = text
-        ta.style.position = 'fixed'
-        ta.style.opacity = '0'
-        document.body.appendChild(ta)
-        ta.select()
-        const done = document.execCommand('copy')
-        document.body.removeChild(ta)
-        if (!done) ok = false
-      } catch {
-        ok = false
-      }
-    }
-    if (!ok) return
+    if (!(await copyText(text))) return
     setCopied(true)
     setTimeout(() => setCopied(false), 1400)
   }

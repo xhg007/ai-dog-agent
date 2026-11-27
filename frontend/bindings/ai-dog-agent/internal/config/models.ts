@@ -34,6 +34,7 @@ export interface AuditReport {
  * Config 应用配置根对象。
  */
 export interface Config {
+    "providers"?: ProviderConfig[] | null;
     "models": ModelConfig[] | null;
     "activeModelId": string;
 
@@ -98,6 +99,8 @@ export interface MCPServerConfig {
 /**
  * ModelConfig 一个 OpenAI 兼容模型配置。
  * BaseURL/APIKey/Model 覆盖 DeepSeek、Qwen、GLM、OpenAI 等所有兼容供应商。
+ * 归属供应商（ProviderID 非空）时，BaseURL/APIKey 运行时由 ProviderConfig 提供，
+ * 磁盘上不再重复保存，避免同一供应商的密钥散落在每个模型里。
  */
 export interface ModelConfig {
     /**
@@ -106,19 +109,24 @@ export interface ModelConfig {
     "id": string;
 
     /**
+     * 所属供应商（LLM 端点）
+     */
+    "providerId"?: string;
+
+    /**
      * 显示名，如 "DeepSeek-V3"
      */
     "name": string;
 
     /**
-     * 如 https://api.deepseek.com/v1
+     * 运行时填充；独立模型才落盘
      */
-    "baseURL": string;
+    "baseURL"?: string;
 
     /**
-     * 密钥
+     * 运行时填充；独立模型才落盘
      */
-    "apiKey": string;
+    "apiKey"?: string;
 
     /**
      * 模型 ID，如 deepseek-chat
@@ -164,9 +172,14 @@ export interface ProjectConfig {
 }
 
 /**
- * ProjectMain 主 Agent 的项目级覆盖（.aidog/main.json）。
+ * ProjectMain 主 Agent 的项目级覆盖（.aidog/main.yml）。
  */
 export interface ProjectMain {
+    /**
+     * AgentID 项目主 Agent 稳定 ID（旧版 .aidog/agent_id 会自动迁移到此）。
+     */
+    "agent_id"?: string;
+
     /**
      * 覆盖激活模型（ID/Name/Model）
      */
@@ -212,6 +225,17 @@ export enum ProjectTrustStatus {
     ProjectUntrusted = "untrusted",
     ProjectBlocked = "blocked",
 };
+
+/**
+ * ProviderConfig 一个 LLM 供应商（OpenAI 兼容端点）的连接配置。
+ * 同一供应商下可以挂多个模型，只需填写一次 BaseURL / API Key。
+ */
+export interface ProviderConfig {
+    "id": string;
+    "name": string;
+    "baseURL": string;
+    "apiKey": string;
+}
 
 /**
  * Severity 审计严重级别。

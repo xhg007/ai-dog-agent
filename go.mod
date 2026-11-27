@@ -1,5 +1,9 @@
 module ai-dog-agent
 
+// DuckDB 固定使用动态库模式（-tags=duckdb_use_lib），go.mod 不再包含各平台预编译静态库。
+// 不要运行 go mod tidy / go mod vendor：它们会把 go.duckdb.org/libduckdb/* 重新写回（约 750MB）。
+// 所有 go 命令（build/test/vet）与 IDE/gopls 都必须带 -tags=duckdb_use_lib。
+
 go 1.26.0
 
 require (
@@ -11,6 +15,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/wailsapp/wails/v3 v3.0.0
 	golang.org/x/mod v0.42.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -56,11 +61,6 @@ require (
 	github.com/yargevad/filepathx v1.0.0 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
-	go.duckdb.org/libduckdb/darwin-amd64 v0.20001.0 // indirect
-	go.duckdb.org/libduckdb/darwin-arm64 v0.20001.0 // indirect
-	go.duckdb.org/libduckdb/linux-amd64 v0.20001.0 // indirect
-	go.duckdb.org/libduckdb/linux-arm64 v0.20001.0 // indirect
-	go.duckdb.org/libduckdb/windows-amd64 v0.20001.0 // indirect
 	golang.org/x/arch v0.11.0 // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
@@ -70,5 +70,4 @@ require (
 	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/tools v0.52.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

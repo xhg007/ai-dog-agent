@@ -1,4 +1,6 @@
 import { useEffect, useId, useState } from 'react'
+import { Check, Copy, Download } from 'lucide-react'
+import { copyText } from '../lib/clipboard'
 
 type MermaidApi = typeof import('mermaid')['default']
 
@@ -233,6 +235,7 @@ export default function MermaidDiagram({ chart }: { chart: string }) {
   const code = chart.trim()
   const [svg, setSvg] = useState('')
   const [error, setError] = useState('')
+  const [flash, setFlash] = useState<'code' | 'svg' | ''>('')
 
   useEffect(() => {
     let cancelled = false
@@ -251,9 +254,49 @@ export default function MermaidDiagram({ chart }: { chart: string }) {
     return () => { cancelled = true }
   }, [code, id])
 
+  const flashFor = (kind: 'code' | 'svg') => {
+    setFlash(kind)
+    window.setTimeout(() => setFlash(''), 1400)
+  }
+
+  const copyCode = async () => {
+    if (await copyText(code)) flashFor('code')
+  }
+
+  const copySvg = async () => {
+    if (await copyText(svg)) flashFor('svg')
+  }
+
+  const saveSvg = () => {
+    if (!svg) return
+    const out = /xmlns=/.test(svg)
+      ? svg
+      : svg.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"')
+    const blob = new Blob([out], { type: 'image/svg+xml;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `mermaid-${Date.now()}.svg`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 0)
+  }
+
   if (error) {
     return (
       <div className="mermaid-block mermaid-block-error">
+        <div className="mermaid-toolbar">
+          <button
+            type="button"
+            className="mermaid-action"
+            title={flash === 'code' ? '已复制' : '复制 Mermaid 代码'}
+            aria-label="复制 Mermaid 代码"
+            onClick={copyCode}
+          >
+            {flash === 'code' ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+          </button>
+        </div>
         <div className="mermaid-error">Mermaid 渲染失败：{error}</div>
         <pre className="mermaid-source">{code}</pre>
       </div>
@@ -265,5 +308,38 @@ export default function MermaidDiagram({ chart }: { chart: string }) {
   }
 
   // Mermaid 在 securityLevel=strict 下会清洗标签；这里渲染的是它生成的 SVG。
-  return <div className="mermaid-block" dangerouslySetInnerHTML={{ __html: svg }} />
+  return (
+    <div className="mermaid-block">
+      <div className="mermaid-toolbar">
+        <button
+          type="button"
+          className="mermaid-action"
+          title={flash === 'code' ? '已复制' : '复制 Mermaid 代码'}
+          aria-label="复制 Mermaid 代码"
+          onClick={copyCode}
+        >
+          {flash === 'code' ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+        </button>
+        <button
+          type="button"
+          className="mermaid-action"
+          title={flash === 'svg' ? '已复制 SVG' : '复制 SVG'}
+          aria-label="复制 SVG"
+          onClick={copySvg}
+        >
+          {flash === 'svg' ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+        </button>
+        <button
+          type="button"
+          className="mermaid-action"
+          title="保存为 SVG"
+          aria-label="保存为 SVG"
+          onClick={saveSvg}
+        >
+          <Download className="size-3.5" />
+        </button>
+      </div>
+      <div className="mermaid-canvas" dangerouslySetInnerHTML={{ __html: svg }} />
+    </div>
+  )
 }

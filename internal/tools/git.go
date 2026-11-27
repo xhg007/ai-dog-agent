@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"ai-dog-agent/internal/winproc"
 	"ai-dog-agent/internal/workspace"
 )
 
@@ -58,6 +59,8 @@ func GitRun(ws *workspace.Manager, args []string) (string, error) {
 	}
 	cmd := exec.Command("git", args...)
 	cmd.Dir = ws.Root()
+	// GUI 进程没有控制台：阻止 git 子进程分配可见窗口
+	winproc.HideConsole(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return strings.TrimSpace(string(out)), fmt.Errorf("git %s 失败: %w", sub, err)
@@ -70,13 +73,14 @@ func GitRun(ws *workspace.Manager, args []string) (string, error) {
 // 有提交时相对 HEAD；空仓库（unborn HEAD，尚无任何提交）降级为工作区 diff，
 // 并附上未跟踪文件清单，避免 exit 128。
 func GitDiff(ws *workspace.Manager) (string, error) {
-	out, err := GitRun(ws, []string{"diff", "HEAD"})
+	// --no-ext-diff：不使用用户配置的外部 diff 工具（GUI 程序会弹窗，且输出不是文本 diff）
+	out, err := GitRun(ws, []string{"diff", "--no-ext-diff", "HEAD"})
 	if err == nil {
 		return out, nil
 	}
 	// unborn HEAD：git diff HEAD 返回 128（ambiguous argument 'HEAD'）
 	if strings.Contains(out, "unknown revision") || strings.Contains(out, "ambiguous argument") || strings.Contains(out, "bad revision") {
-		tracked, derr := GitRun(ws, []string{"diff"})
+		tracked, derr := GitRun(ws, []string{"diff", "--no-ext-diff"})
 		if derr != nil {
 			return "", derr
 		}

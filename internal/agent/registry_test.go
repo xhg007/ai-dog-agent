@@ -93,3 +93,29 @@ func TestRegistryConcurrentLookup(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// TestRegistryListAll 汇总所有会话的子 Agent 快照，并按会话、名称排序。
+func TestRegistryListAll(t *testing.T) {
+	r := NewRegistry()
+	r.Register("s2", testWorkAgent("a2", "Reviewer"))
+	r.Register("s1", testWorkAgent("a1", "Coder"))
+	r.Register("s1", testWorkAgent("a3", "Architect"))
+
+	got := r.ListAll()
+	if len(got) != 3 {
+		t.Fatalf("ListAll=%d, want 3", len(got))
+	}
+	want := []struct{ session, name, tool string }{
+		{"s1", "Architect", "dispatch_architect"},
+		{"s1", "Coder", "dispatch_coder"},
+		{"s2", "Reviewer", "dispatch_reviewer"},
+	}
+	for i, w := range want {
+		if got[i].SessionID != w.session || got[i].Name != w.name || got[i].Tool != w.tool {
+			t.Fatalf("ListAll[%d]=%+v, want session=%s name=%s tool=%s", i, got[i], w.session, w.name, w.tool)
+		}
+		if got[i].AgentID == "" {
+			t.Fatalf("ListAll[%d] 缺少 agentId", i)
+		}
+	}
+}

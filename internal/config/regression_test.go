@@ -66,7 +66,7 @@ func TestSaveSucceedsAndBumpsVersion(t *testing.T) {
 	if got := reloaded.Get(); len(got.Models) != 1 || got.Models[0].ID != "m1" {
 		t.Fatalf("配置未落盘: %+v", got)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "config.json")); err != nil {
-		t.Fatalf("config.json 不存在: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, "config.yml")); err != nil {
+		t.Fatalf("config.yml 不存在: %v", err)
 	}
 }

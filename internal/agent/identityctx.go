@@ -12,10 +12,14 @@ import (
 
 	"ai-dog-agent/internal/approval"
 	"ai-dog-agent/internal/config"
+	"ai-dog-agent/internal/llm"
 )
 
 // withAgentIdentity 为 work agent 运行上下文注入 AgentID 与实际模型信息。
 func withAgentIdentity(ctx context.Context, agentID string, mc config.ModelConfig) context.Context {
+	// 子 Agent 与主 Agent 可能共用同一个 tap 包装模型（内置 explorer）：
+	// 清除流式旁路，避免子 Agent 的推理文本以 chat_delta 混入主回复气泡。
+	ctx = llm.WithoutTap(ctx)
 	ctx = approval.WithAgentID(ctx, agentID)
 	if oi := obsFromCtx(ctx); oi != nil {
 		cp := *oi

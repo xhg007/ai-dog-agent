@@ -10,6 +10,7 @@ import (
 	"unicode"
 
 	"ai-dog-agent/internal/approval"
+	"ai-dog-agent/internal/winproc"
 	"ai-dog-agent/internal/workspace"
 )
 
@@ -80,6 +81,8 @@ func runCommand(ctx context.Context, ws *workspace.Manager, prog string, args []
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, prog, args...)
 	cmd.Dir = ws.Root()
+	// GUI 进程没有控制台：阻止子进程分配可见窗口
+	winproc.HideConsole(cmd)
 	out, e := cmd.CombinedOutput()
 	text = truncateOutput(string(out), MaxShellOutput)
 	if e != nil {

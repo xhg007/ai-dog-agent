@@ -85,8 +85,12 @@ func run() error {
 	apprSvc := service.NewApprovalService(apprMgr, wsMgr, backupRoot)
 	mcpSvc := service.NewMCPService(wsMgr, mcpMgr)
 	taskSvc := service.NewTaskService(taskMgr)
+	// 观测台：独立窗口 + 初始快照；实时事件由 agent:event 广播到所有窗口。
+	// app 在 application.New 之后才存在，用闭包延迟取。
+	var app *application.App
+	obsSvc := service.NewObservabilityService(chatSvc, taskMgr, func() *application.App { return app })
 
-	app := application.New(application.Options{
+	app = application.New(application.Options{
 		Name:        "ai-dog-agent",
 		Description: "桌面端多 Agent 编码开发助手",
 		Services: []application.Service{
@@ -96,6 +100,7 @@ func run() error {
 			application.NewService(taskSvc),
 			application.NewService(mcpSvc),
 			application.NewService(chatSvc),
+			application.NewService(obsSvc),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
